@@ -73,25 +73,74 @@ impl Utf8Candidate {
     }
 }
 
+enum AsciiCjk {
+    AsciiLetter,
+    Cjk,
+    Other,
+}
+
 struct GbkCandidate {
     decoder: Decoder,
+    euc_range: u64,
+    non_euc_range: u64,
+    prev_was_euc_range: bool,
+    cjk_pairs: u64,
+    ascii_cjk_pairs: u64,
+    prev: AsciiCjk,
+    pua: u64,
 }
 
 impl GbkCandidate {
     fn feed(&mut self, buffer: &[u8], last: bool) -> bool {
-        let mut dst = [0u16; 1024];
-        let mut total_read = 0;
-        loop {
-            let (result, read, written) = self.decoder.decode_to_utf16_without_replacement(
-                &buffer[total_read..],
-                &mut dst,
-                last,
-            );
-            total_read += read;
-            for &u in dst[..written].iter() {
-            	// Exclude Private Use Areas to make it less likely
-            	// that arbitrary byte sequences match as valid.
-                if u >= 0xE000 && u <= 0xF8FF {
+        let mut src = [0u8];
+        let mut dst = [0u16; 2];
+        for &b in buffer {
+            let in_euc_range = b >= 0xA1 && b <= 0xFE;
+            src[0] = b;
+            let (result, read, written) = self
+                .decoder
+                .decode_to_utf16_without_replacement(&src, &mut dst, false);
+            assert_eq!(read, 1);
+            if written == 1 {
+                let u = dst[0];
+                if (u >= u16::from(b'a') && u <= u16::from(b'z'))
+                    || (u >= u16::from(b'a') && u <= u16::from(b'z'))
+                {
+                    match self.prev {
+                        AsciiCjk::Cjk => {
+                            self.ascii_cjk_pairs += 1;
+                        }
+                        _ => {}
+                    }
+                    self.prev = AsciiCjk::AsciiLetter;
+                } else if u >= 0x4E00 && u <= 0x9FA5 {
+                    if self.prev_was_euc_range && in_euc_range {
+                        self.euc_range += 1;
+                    } else {
+                        self.non_euc_range += 1;
+                    }
+                    match self.prev {
+                        AsciiCjk::Cjk => {
+                            self.cjk_pairs += 1;
+                        }
+                        AsciiCjk::AsciiLetter => {
+                            self.ascii_cjk_pairs += 1;
+                        }
+                        AsciiCjk::Other => {}
+                    }
+                    self.prev = AsciiCjk::Cjk;
+                } else if (u >= 0x3400 && u < 0xA000) || (u >= 0xF900 && u < 0xFB00) {
+                    match self.prev {
+                        AsciiCjk::Cjk => {
+                            self.cjk_pairs += 1;
+                        }
+                        AsciiCjk::AsciiLetter => {
+                            self.ascii_cjk_pairs += 1;
+                        }
+                        AsciiCjk::Other => {}
+                    }
+                    self.prev = AsciiCjk::Cjk;
+                } else if u >= 0xE000 && u < 0xF900 {
                     // Allow PUA characters in AR PL UMing CN on the
                     // assumption that since they complete logical sequences
                     // they might be supported by other fonts, too.
@@ -111,31 +160,69 @@ impl GbkCandidate {
                         | 0xE855
                         | 0xE864 => {}
                         _ => {
-                            return true;
+                            self.pua += 1;
                         }
                     }
-                } else if u >= 0xDB80 && u <= 0xDBFF {
-                	return true;
+                    self.prev = AsciiCjk::Other;
+                } else {
+                    self.prev = AsciiCjk::Other;
+                }
+            } else if written == 2 {
+                let u = dst[0];
+                if u >= 0xDB80 && u <= 0xDBFF {
+                    self.pua += 1;
+                    self.prev = AsciiCjk::Other;
+                } else if u >= 0xD480 && u < 0xD880 {
+                    match self.prev {
+                        AsciiCjk::Cjk => {
+                            self.cjk_pairs += 1;
+                        }
+                        AsciiCjk::AsciiLetter => {
+                            self.ascii_cjk_pairs += 1;
+                        }
+                        AsciiCjk::Other => {}
+                    }
+                    self.prev = AsciiCjk::Cjk;
+                } else if !(u >= 0xDC00 && u <= 0xDBFF) {
+                    self.prev = AsciiCjk::Other;
                 }
             }
             match result {
-                DecoderResult::InputEmpty => {
-                    return false;
-                }
+                DecoderResult::InputEmpty => {}
                 DecoderResult::Malformed(_, _) => {
                     return true;
                 }
                 DecoderResult::OutputFull => {
-                    continue;
+                    unreachable!();
+                }
+            }
+            self.prev_was_euc_range = in_euc_range;
+        }
+        if last {
+            let (result, _, _) = self
+                .decoder
+                .decode_to_utf16_without_replacement(b"", &mut dst, true);
+            match result {
+                DecoderResult::InputEmpty => {}
+                DecoderResult::Malformed(_, _) => {
+                    return true;
+                }
+                DecoderResult::OutputFull => {
+                    unreachable!();
                 }
             }
         }
+        return false;
     }
 }
 
 struct ShiftJisCandidate {
     decoder: Decoder,
     non_ascii_seen: bool,
+    cjk_pairs: u64,
+    ascii_cjk_pairs: u64,
+    prev: AsciiCjk,
+    pua: u64,
 }
 
 impl ShiftJisCandidate {
@@ -149,15 +236,42 @@ impl ShiftJisCandidate {
                 last,
             );
             total_read += read;
-            if !self.non_ascii_seen {
-                for &u in dst[..written].iter() {
-                    if u >= 0x80 {
-                        self.non_ascii_seen = true;
-                        if u >= 0xFF61 && u <= 0xFF9F {
-                            return true;
-                        }
-                        break;
+            for &u in dst[..written].iter() {
+                if !self.non_ascii_seen && u >= 0x80 {
+                    self.non_ascii_seen = true;
+                    if u >= 0xFF61 && u <= 0xFF9F {
+                        return true;
                     }
+                }
+                if (u >= u16::from(b'a') && u <= u16::from(b'z'))
+                    || (u >= u16::from(b'a') && u <= u16::from(b'z'))
+                {
+                    match self.prev {
+                        AsciiCjk::Cjk => {
+                            self.ascii_cjk_pairs += 1;
+                        }
+                        _ => {}
+                    }
+                    self.prev = AsciiCjk::AsciiLetter;
+                } else if (u >= 0x3400 && u < 0xA000)
+                    || (u >= 0xF900 && u < 0xFB00)
+                    || (u >= 0x3040 && u < 0x3100)
+                {
+                    match self.prev {
+                        AsciiCjk::Cjk => {
+                            self.cjk_pairs += 1;
+                        }
+                        AsciiCjk::AsciiLetter => {
+                            self.ascii_cjk_pairs += 1;
+                        }
+                        AsciiCjk::Other => {}
+                    }
+                    self.prev = AsciiCjk::Cjk;
+                } else if u >= 0xE000 && u < 0xF900 {
+                    self.pua += 1;
+                    self.prev = AsciiCjk::Other;
+                } else {
+                    self.prev = AsciiCjk::Other;
                 }
             }
             match result {
@@ -178,8 +292,10 @@ impl ShiftJisCandidate {
 struct EucJpCandidate {
     decoder: Decoder,
     kana: u64,
-    kanji: u64,
     non_ascii_seen: bool,
+    cjk_pairs: u64,
+    ascii_cjk_pairs: u64,
+    prev: AsciiCjk,
 }
 
 impl EucJpCandidate {
@@ -194,22 +310,47 @@ impl EucJpCandidate {
             );
             total_read += read;
             for &u in dst[..written].iter() {
-                if !self.non_ascii_seen {
-                    if u >= 0x80 {
-                        self.non_ascii_seen = true;
-                        if u >= 0xFF61 && u <= 0xFF9F {
-                            return true;
-                        }
+                if !self.non_ascii_seen && u >= 0x80 {
+                    self.non_ascii_seen = true;
+                    if u >= 0xFF61 && u <= 0xFF9F {
+                        return true;
                     }
                 }
-                match u {
-                    0x3041...0x3093 | 0x30A1...0x30F6 => {
-                        self.kana += 1;
+                if (u >= u16::from(b'a') && u <= u16::from(b'z'))
+                    || (u >= u16::from(b'a') && u <= u16::from(b'z'))
+                {
+                    match self.prev {
+                        AsciiCjk::Cjk => {
+                            self.ascii_cjk_pairs += 1;
+                        }
+                        _ => {}
                     }
-                    0xE400...0xFA2D => {
-                        self.kanji += 1;
+                    self.prev = AsciiCjk::AsciiLetter;
+                } else if u >= 0x3040 && u < 0x3100 {
+                    self.kana += 1;
+                    match self.prev {
+                        AsciiCjk::Cjk => {
+                            self.cjk_pairs += 1;
+                        }
+                        AsciiCjk::AsciiLetter => {
+                            self.ascii_cjk_pairs += 1;
+                        }
+                        AsciiCjk::Other => {}
                     }
-                    _ => {}
+                    self.prev = AsciiCjk::Cjk;
+                } else if (u >= 0x3400 && u < 0xA000) || (u >= 0xF900 && u < 0xFB00) {
+                    match self.prev {
+                        AsciiCjk::Cjk => {
+                            self.cjk_pairs += 1;
+                        }
+                        AsciiCjk::AsciiLetter => {
+                            self.ascii_cjk_pairs += 1;
+                        }
+                        AsciiCjk::Other => {}
+                    }
+                    self.prev = AsciiCjk::Cjk;
+                } else {
+                    self.prev = AsciiCjk::Other;
                 }
             }
             match result {
@@ -257,12 +398,171 @@ impl Iso2022Candidate {
     }
 }
 
+struct Big5Candidate {
+    decoder: Decoder,
+    cjk_pairs: u64,
+    ascii_cjk_pairs: u64,
+    prev: AsciiCjk,
+}
+
+impl Big5Candidate {
+    fn feed(&mut self, buffer: &[u8], last: bool) -> bool {
+        let mut dst = [0u16; 1024];
+        let mut total_read = 0;
+        loop {
+            let (result, read, written) = self.decoder.decode_to_utf16_without_replacement(
+                &buffer[total_read..],
+                &mut dst,
+                last,
+            );
+            total_read += read;
+            for &u in dst[..written].iter() {
+                if (u >= u16::from(b'a') && u <= u16::from(b'z'))
+                    || (u >= u16::from(b'a') && u <= u16::from(b'z'))
+                {
+                    match self.prev {
+                        AsciiCjk::Cjk => {
+                            self.ascii_cjk_pairs += 1;
+                        }
+                        _ => {}
+                    }
+                    self.prev = AsciiCjk::AsciiLetter;
+                } else if (u >= 0x3400 && u < 0xA000)
+                    || (u >= 0xF900 && u < 0xFB00)
+                    || (u >= 0xD480 && u < 0xD880)
+                {
+                    match self.prev {
+                        AsciiCjk::Cjk => {
+                            self.cjk_pairs += 1;
+                        }
+                        AsciiCjk::AsciiLetter => {
+                            self.ascii_cjk_pairs += 1;
+                        }
+                        AsciiCjk::Other => {}
+                    }
+                    self.prev = AsciiCjk::Cjk;
+                } else if !(u >= 0xDC00 && u <= 0xDBFF) {
+                    self.prev = AsciiCjk::Other;
+                }
+            }
+            match result {
+                DecoderResult::InputEmpty => {
+                    return false;
+                }
+                DecoderResult::Malformed(_, _) => {
+                    return true;
+                }
+                DecoderResult::OutputFull => {
+                    continue;
+                }
+            }
+        }
+    }
+}
+
+struct EucKrCandidate {
+    decoder: Decoder,
+    modern_hangul: u64,
+    other_hangul: u64,
+    hanja: u64,
+    prev_was_euc_range: bool,
+    cjk_pairs: u64,
+    ascii_cjk_pairs: u64,
+    prev: AsciiCjk,
+}
+
+impl EucKrCandidate {
+    fn feed(&mut self, buffer: &[u8], last: bool) -> bool {
+        let mut src = [0u8];
+        let mut dst = [0u16; 2];
+        for &b in buffer {
+            let in_euc_range = b >= 0xA1 && b <= 0xFE;
+            src[0] = b;
+            let (result, read, written) = self
+                .decoder
+                .decode_to_utf16_without_replacement(&src, &mut dst, false);
+            assert_eq!(read, 1);
+            if written > 0 {
+                let u = dst[0];
+                if (u >= u16::from(b'a') && u <= u16::from(b'z'))
+                    || (u >= u16::from(b'a') && u <= u16::from(b'z'))
+                {
+                    match self.prev {
+                        AsciiCjk::Cjk => {
+                            self.ascii_cjk_pairs += 1;
+                        }
+                        _ => {}
+                    }
+                    self.prev = AsciiCjk::AsciiLetter;
+                } else if u >= 0xAC00 && u <= 0xD7A3 {
+                    if self.prev_was_euc_range && in_euc_range {
+                        self.modern_hangul += 1;
+                    } else {
+                        self.other_hangul += 1;
+                    }
+                    match self.prev {
+                        AsciiCjk::Cjk => {
+                            self.cjk_pairs += 1;
+                        }
+                        AsciiCjk::AsciiLetter => {
+                            self.ascii_cjk_pairs += 1;
+                        }
+                        AsciiCjk::Other => {}
+                    }
+                    self.prev = AsciiCjk::Cjk;
+                } else if (u >= 0x4E00 && u < 0xAC00) || (u >= 0xF900 && u <= 0xFA0B) {
+                    self.hanja += 1;
+                    match self.prev {
+                        AsciiCjk::Cjk => {
+                            self.cjk_pairs += 1;
+                        }
+                        AsciiCjk::AsciiLetter => {
+                            self.ascii_cjk_pairs += 1;
+                        }
+                        AsciiCjk::Other => {}
+                    }
+                    self.prev = AsciiCjk::Cjk;
+                } else {
+                    self.prev = AsciiCjk::Other;
+                }
+            }
+            match result {
+                DecoderResult::InputEmpty => {}
+                DecoderResult::Malformed(_, _) => {
+                    return true;
+                }
+                DecoderResult::OutputFull => {
+                    unreachable!();
+                }
+            }
+            self.prev_was_euc_range = in_euc_range;
+        }
+        if last {
+            let (result, _, _) = self
+                .decoder
+                .decode_to_utf16_without_replacement(b"", &mut dst, true);
+            match result {
+                DecoderResult::InputEmpty => {}
+                DecoderResult::Malformed(_, _) => {
+                    return true;
+                }
+                DecoderResult::OutputFull => {
+                    unreachable!();
+                }
+            }
+        }
+        return false;
+    }
+}
+
 enum InnerCandidate {
     Single(SingleByteCandidate),
     Utf8(Utf8Candidate),
     Iso2022(Iso2022Candidate),
     Shift(ShiftJisCandidate),
     EucJp(EucJpCandidate),
+    EucKr(EucKrCandidate),
+    Big5(Big5Candidate),
     Gbk(GbkCandidate),
 }
 
@@ -282,6 +582,12 @@ impl InnerCandidate {
                 return c.feed(buffer, last);
             }
             InnerCandidate::EucJp(c) => {
+                return c.feed(buffer, last);
+            }
+            InnerCandidate::EucKr(c) => {
+                return c.feed(buffer, last);
+            }
+            InnerCandidate::Big5(c) => {
                 return c.feed(buffer, last);
             }
             InnerCandidate::Gbk(c) => {
@@ -334,6 +640,10 @@ impl Candidate {
             inner: InnerCandidate::Shift(ShiftJisCandidate {
                 decoder: SHIFT_JIS.new_decoder_without_bom_handling(),
                 non_ascii_seen: false,
+                cjk_pairs: 0,
+                ascii_cjk_pairs: 0,
+                prev: AsciiCjk::Other,
+                pua: 0,
             }),
             disqualified: false,
         }
@@ -345,7 +655,37 @@ impl Candidate {
                 decoder: EUC_JP.new_decoder_without_bom_handling(),
                 non_ascii_seen: false,
                 kana: 0,
-                kanji: 0,
+                cjk_pairs: 0,
+                ascii_cjk_pairs: 0,
+                prev: AsciiCjk::Other,
+            }),
+            disqualified: false,
+        }
+    }
+
+    fn new_euc_kr() -> Self {
+        Candidate {
+            inner: InnerCandidate::EucKr(EucKrCandidate {
+                decoder: BIG5.new_decoder_without_bom_handling(),
+                modern_hangul: 0,
+                other_hangul: 0,
+                hanja: 0,
+                prev_was_euc_range: false,
+                cjk_pairs: 0,
+                ascii_cjk_pairs: 0,
+                prev: AsciiCjk::Other,
+            }),
+            disqualified: false,
+        }
+    }
+
+    fn new_big5() -> Self {
+        Candidate {
+            inner: InnerCandidate::Big5(Big5Candidate {
+                decoder: BIG5.new_decoder_without_bom_handling(),
+                cjk_pairs: 0,
+                ascii_cjk_pairs: 0,
+                prev: AsciiCjk::Other,
             }),
             disqualified: false,
         }
@@ -355,6 +695,13 @@ impl Candidate {
         Candidate {
             inner: InnerCandidate::Gbk(GbkCandidate {
                 decoder: GBK.new_decoder_without_bom_handling(),
+                euc_range: 0,
+                non_euc_range: 0,
+                prev_was_euc_range: false,
+                cjk_pairs: 0,
+                ascii_cjk_pairs: 0,
+                prev: AsciiCjk::Other,
+                pua: 0,
             }),
             disqualified: false,
         }
@@ -381,6 +728,76 @@ impl Candidate {
             }
         }
     }
+
+    fn increment_score(&mut self) {
+        match &mut self.inner {
+            InnerCandidate::Single(c) => {
+                c.score += 1;
+            }
+            _ => {
+                unreachable!();
+            }
+        }
+    }
+
+    fn euc_jp_kana(&self) -> u64 {
+        match &self.inner {
+            InnerCandidate::EucJp(c) => {
+                return c.kana;
+            }
+            _ => {
+                unreachable!();
+            }
+        }
+    }
+
+    fn euc_kr_stats(&self) -> (u64, u64, u64) {
+        match &self.inner {
+            InnerCandidate::EucKr(c) => {
+                return (c.modern_hangul, c.other_hangul, c.hanja);
+            }
+            _ => {
+                unreachable!();
+            }
+        }
+    }
+
+    fn ascii_pair_ratio_ok(&self) -> bool {
+        let (cjk_pairs, ascii_cjk_pairs) = match &self.inner {
+            InnerCandidate::Single(_) | InnerCandidate::Utf8(_) | InnerCandidate::Iso2022(_) => {
+                unreachable!();
+            }
+            InnerCandidate::Shift(c) => (c.cjk_pairs, c.ascii_cjk_pairs),
+            InnerCandidate::EucJp(c) => (c.cjk_pairs, c.ascii_cjk_pairs),
+            InnerCandidate::EucKr(c) => (c.cjk_pairs, c.ascii_cjk_pairs),
+            InnerCandidate::Big5(c) => (c.cjk_pairs, c.ascii_cjk_pairs),
+            InnerCandidate::Gbk(c) => (c.cjk_pairs, c.ascii_cjk_pairs),
+        };
+        ascii_cjk_pairs < cjk_pairs / 128 // Arbitrary allowance
+    }
+
+    fn pua_ratio_ok(&self) -> bool {
+        let (cjk_pairs, pua) = match &self.inner {
+            InnerCandidate::Shift(c) => (c.cjk_pairs, c.pua),
+            InnerCandidate::Gbk(c) => (c.cjk_pairs, c.pua),
+            _ => {
+                unreachable!();
+            }
+        };
+        pua < cjk_pairs / 256 // Arbitrary allowance
+    }
+
+    fn gbk_euc_ratio_ok(&self) -> bool {
+        match &self.inner {
+            InnerCandidate::Gbk(c) => {
+                // Arbitrary allowance
+                c.non_euc_range < c.euc_range / 256
+            }
+            _ => {
+                unreachable!();
+            }
+        }
+    }
 }
 
 fn count_non_ascii(buffer: &[u8]) -> u64 {
@@ -394,7 +811,7 @@ fn count_non_ascii(buffer: &[u8]) -> u64 {
 }
 
 pub struct EncodingDetector {
-    candidates: [Candidate; 23],
+    candidates: [Candidate; 25],
     non_ascii_seen: u64,
     fallback: Option<&'static Encoding>,
     last_before_non_ascii: Option<u8>,
@@ -427,20 +844,14 @@ impl EncodingDetector {
                     let src = [ascii];
                     self.feed_impl(&src, false);
                 }
+                start
+            } else {
+                start - 1
             }
-            start
         } else {
             0
         };
         self.feed_impl(&buffer[start..], last);
-    }
-
-    fn fallback_is_multibyte(&self) -> bool {
-        if let Some(encoding) = self.fallback {
-            !encoding.is_single_byte()
-        } else {
-            false
-        }
     }
 
     fn guess(&self) -> (&'static Encoding, bool) {
@@ -453,46 +864,107 @@ impl EncodingDetector {
 
         let utf = !self.candidates[Self::UTF_8_INDEX].disqualified;
 
-        if self.fallback_is_multibyte() || self.non_ascii_seen > 50 {
-            if let Some(fallback) = self.fallback {
-                if fallback == EUC_KR && !self.candidates[Self::EUC_KR_INDEX].disqualified {
-                    return (EUC_KR, utf);
+        let mut euc_kr_ok = !self.candidates[Self::EUC_KR_INDEX].disqualified;
+        let mut big5_ok = !self.candidates[Self::BIG5_INDEX].disqualified;
+        let mut gbk_ok = !self.candidates[Self::GBK_INDEX].disqualified;
+        let mut shift_jis_ok = !self.candidates[Self::SHIFT_JIS_INDEX].disqualified;
+        let mut euc_jp_ok = !self.candidates[Self::EUC_JP_INDEX].disqualified;
+        if let Some(fallback) = self.fallback {
+            if fallback == EUC_KR && euc_kr_ok {
+                return (EUC_KR, utf);
+            }
+            if fallback == BIG5 {
+                if big5_ok {
+                    return (BIG5, utf);
                 }
-                if fallback == BIG5 {
-                    if !self.candidates[Self::BIG5_INDEX].disqualified {
-                        return (BIG5, utf);
-                    }
-                    if !self.candidates[Self::GBK_INDEX].disqualified {
-                        return (GBK, utf);
-                    }
-                }
-                if fallback == GBK {
-                    if !self.candidates[Self::GBK_INDEX].disqualified {
-                        return (GBK, utf);
-                    }
-                    if !self.candidates[Self::BIG5_INDEX].disqualified {
-                        return (BIG5, utf);
-                    }
-                }
-                if fallback == SHIFT_JIS {
-                    if !self.candidates[Self::SHIFT_JIS_INDEX].disqualified {
-                        return (SHIFT_JIS, utf);
-                    }
-                    if !self.candidates[Self::EUC_JP_INDEX].disqualified {
-                        return (EUC_JP, utf);
-                    }
-                }
-                if fallback == EUC_JP {
-                    if !self.candidates[Self::EUC_JP_INDEX].disqualified {
-                        return (EUC_JP, utf);
-                    }
-                    if !self.candidates[Self::SHIFT_JIS_INDEX].disqualified {
-                        return (SHIFT_JIS, utf);
-                    }
+                if gbk_ok {
+                    return (GBK, utf);
                 }
             }
-            if !self.candidates[Self::SHIFT_JIS_INDEX].disqualified {
+            if fallback == GBK {
+                if gbk_ok {
+                    return (GBK, utf);
+                }
+                if big5_ok {
+                    return (BIG5, utf);
+                }
+            }
+            if fallback == SHIFT_JIS {
+                if shift_jis_ok {
+                    return (SHIFT_JIS, utf);
+                }
+                if euc_jp_ok {
+                    return (EUC_JP, utf);
+                }
+            }
+            if fallback == EUC_JP {
+                if euc_jp_ok {
+                    return (EUC_JP, utf);
+                }
+                if shift_jis_ok {
+                    return (SHIFT_JIS, utf);
+                }
+            }
+        }
+
+        if self.non_ascii_seen > 50 {
+            // Check if there are implausible ASCII letter pairings with
+            // CJK characters.
+            if !self.candidates[Self::EUC_KR_INDEX].ascii_pair_ratio_ok() {
+                euc_kr_ok = false;
+            }
+            if !self.candidates[Self::BIG5_INDEX].ascii_pair_ratio_ok() {
+                big5_ok = false;
+            }
+            if !self.candidates[Self::GBK_INDEX].ascii_pair_ratio_ok()
+                || !self.candidates[Self::GBK_INDEX].pua_ratio_ok()
+                || !self.candidates[Self::GBK_INDEX].gbk_euc_ratio_ok()
+            {
+                gbk_ok = false;
+            }
+            if !self.candidates[Self::SHIFT_JIS_INDEX].ascii_pair_ratio_ok()
+                || !self.candidates[Self::SHIFT_JIS_INDEX].pua_ratio_ok()
+            {
+                shift_jis_ok = false;
+            }
+            if !self.candidates[Self::SHIFT_JIS_INDEX].ascii_pair_ratio_ok() {
+                euc_jp_ok = false;
+            }
+
+            if shift_jis_ok {
                 return (SHIFT_JIS, utf);
+            }
+
+            let euc_jp_kana = if euc_jp_ok {
+                self.candidates[Self::EUC_JP_INDEX].euc_jp_kana()
+            } else {
+                0
+            };
+            if euc_jp_kana != 0 {
+                gbk_ok = false;
+            }
+            let (modern_hangul, other_hangul, hanja) =
+                self.candidates[Self::EUC_KR_INDEX].euc_kr_stats();
+            // Arbitrary allowances for Hanja and non-modern Hangul
+            if other_hangul >= modern_hangul / 256 || hanja >= modern_hangul / 128 {
+                euc_kr_ok = false;
+            }
+            if gbk_ok {
+                if euc_kr_ok {
+                    return (EUC_KR, utf);
+                }
+                return (GBK, utf);
+            } else if euc_jp_ok {
+                // Arbitrary allowance for standalone jamo, which overlap
+                // the kana range.
+                if euc_kr_ok && euc_jp_kana < modern_hangul / 256 {
+                    return (EUC_KR, utf);
+                }
+                return (EUC_JP, utf);
+            } else if euc_kr_ok {
+                return (EUC_KR, utf);
+            } else if big5_ok {
+                return (BIG5, utf);
             }
         }
 
@@ -540,13 +1012,14 @@ impl EncodingDetector {
     const FIRST_SINGLE_BYTE: usize = 7;
 
     pub fn new_with_fallback(fallback: Option<&'static Encoding>) -> Self {
-        EncodingDetector {
+        let mut det = EncodingDetector {
             candidates: [
                 Candidate::new_utf_8(),
                 Candidate::new_iso_2022_jp(),
                 Candidate::new_shift_jis(),
                 Candidate::new_euc_jp(),
-
+                Candidate::new_euc_kr(),
+                Candidate::new_big5(),
                 Candidate::new_gbk(),
                 Candidate::new_single_byte(&SINGLE_BYTE_DATA[WINDOWS_1252_INDEX]),
                 Candidate::new_single_byte(&SINGLE_BYTE_DATA[WINDOWS_1251_INDEX]),
@@ -571,7 +1044,16 @@ impl EncodingDetector {
             fallback: fallback,
             last_before_non_ascii: None,
             esc_seen: false,
+        };
+        if let Some(fallback) = fallback {
+            for single_byte in det.candidates[Self::FIRST_SINGLE_BYTE..].iter_mut() {
+                if single_byte.encoding() == fallback {
+                    single_byte.increment_score();
+                    break;
+                }
+            }
         }
+        det
     }
 }
 
@@ -583,6 +1065,8 @@ mod tests {
         let (bytes, _, _) = encoding.encode(input);
         let mut det = EncodingDetector::new();
         let (enc, _, _) = det.feed(&bytes, true);
+        let (decoded, _) = enc.decode_without_bom_handling(&bytes);
+        println!("{:?}", decoded);
         assert_eq!(enc, encoding);
     }
 
@@ -610,4 +1094,13 @@ mod tests {
         check("Ελληνικά", WINDOWS_1253);
     }
 
+    #[test]
+    fn test_de() {
+        check("Straße", WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_foo() {
+        check("aße", WINDOWS_1252);
+    }
 }
