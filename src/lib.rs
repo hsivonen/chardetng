@@ -1,11 +1,3 @@
-use encoding_rs::WINDOWS_1250;
-use encoding_rs::ISO_8859_2;
-use encoding_rs::ISO_8859_7;
-use encoding_rs::ISO_8859_8;
-use encoding_rs::ISO_8859_4;
-use encoding_rs::WINDOWS_1257;
-use encoding_rs::WINDOWS_1256;
-use encoding_rs::ISO_8859_6;
 use encoding_rs::Decoder;
 use encoding_rs::DecoderResult;
 use encoding_rs::Encoding;
@@ -13,13 +5,24 @@ use encoding_rs::BIG5;
 use encoding_rs::EUC_JP;
 use encoding_rs::EUC_KR;
 use encoding_rs::GBK;
+use encoding_rs::IBM866;
 use encoding_rs::ISO_2022_JP;
+use encoding_rs::ISO_8859_2;
+use encoding_rs::ISO_8859_4;
+use encoding_rs::ISO_8859_5;
+use encoding_rs::ISO_8859_6;
+use encoding_rs::ISO_8859_7;
+use encoding_rs::ISO_8859_8;
+use encoding_rs::KOI8_U;
 use encoding_rs::SHIFT_JIS;
 use encoding_rs::UTF_8;
+use encoding_rs::WINDOWS_1250;
 use encoding_rs::WINDOWS_1251;
 use encoding_rs::WINDOWS_1252;
 use encoding_rs::WINDOWS_1253;
 use encoding_rs::WINDOWS_1255;
+use encoding_rs::WINDOWS_1256;
+use encoding_rs::WINDOWS_1257;
 use encoding_rs::WINDOWS_874;
 
 mod data;
@@ -999,6 +1002,20 @@ impl Candidate {
         }
     }
 
+    fn plausible_punctuation(&self) -> u64 {
+        match &self.inner {
+            InnerCandidate::Logical(c) => {
+                return c.plausible_punctuation;
+            }
+            InnerCandidate::Visual(c) => {
+                return c.plausible_punctuation;
+            }
+            _ => {
+                unreachable!();
+            }
+        }
+    }
+
     fn encoding(&self) -> &'static Encoding {
         match &self.inner {
             InnerCandidate::Cased(c) => {
@@ -1248,52 +1265,79 @@ impl EncodingDetector {
 
         let mut encoding = WINDOWS_1252;
         let mut max = i64::min_value();
-        for candidate in (&self.candidates[Self::FIRST_SINGLE_BYTE..]).iter() {
+        for candidate in (&self.candidates[Self::FIRST_NORMAL_SINGLE_BYTE..]).iter() {
             let score = candidate.single_byte_score();
-            println!("{} {} {}", candidate.encoding().name(), score, candidate.disqualified);
+            println!(
+                "{} {} {}",
+                candidate.encoding().name(),
+                score,
+                candidate.disqualified
+            );
             if !candidate.disqualified && score > max {
                 max = score;
                 encoding = candidate.encoding();
             }
         }
-        // XXX Visual
-        // XXX negative max score
-
+        let visual = &self.candidates[Self::VISUAL_INDEX];
+        let visual_score = visual.single_byte_score();
+        if !visual.disqualified
+            && visual_score > max
+            && visual.plausible_punctuation()
+                > self.candidates[Self::LOGICAL_INDEX].plausible_punctuation()
+        {
+            max = visual_score;
+            encoding = ISO_8859_8;
+        }
         if let Some(fallback) = self.fallback {
             if fallback == encoding {
                 return (encoding, utf);
             }
             if fallback == WINDOWS_1250 && encoding == ISO_8859_2 {
-                return (encoding, utf);                
+                return (encoding, utf);
             }
             if fallback == ISO_8859_2 && encoding == WINDOWS_1250 {
-                return (encoding, utf);                
+                return (encoding, utf);
             }
             if fallback == WINDOWS_1253 && encoding == ISO_8859_7 {
-                return (encoding, utf);                
+                return (encoding, utf);
             }
             if fallback == ISO_8859_7 && encoding == WINDOWS_1253 {
-                return (encoding, utf);                
+                return (encoding, utf);
             }
             if fallback == WINDOWS_1255 && encoding == ISO_8859_8 {
-                return (encoding, utf);                
+                return (encoding, utf);
             }
             if fallback == ISO_8859_8 && encoding == WINDOWS_1255 {
-                return (encoding, utf);                
+                return (encoding, utf);
             }
             if fallback == WINDOWS_1256 && encoding == ISO_8859_6 {
-                return (encoding, utf);                
+                return (encoding, utf);
             }
             if fallback == ISO_8859_6 && encoding == WINDOWS_1256 {
-                return (encoding, utf);                
+                return (encoding, utf);
             }
             if fallback == WINDOWS_1257 && encoding == ISO_8859_4 {
-                return (encoding, utf);                
+                return (encoding, utf);
             }
             if fallback == ISO_8859_4 && encoding == WINDOWS_1257 {
-                return (encoding, utf);                
+                return (encoding, utf);
             }
-            // XXX Cyrillic
+            if (fallback == WINDOWS_1251
+                || fallback == KOI8_U
+                || fallback == ISO_8859_5
+                || fallback == IBM866)
+                && (encoding == WINDOWS_1251
+                    || encoding == KOI8_U
+                    || encoding == ISO_8859_5
+                    || encoding == IBM866)
+            {
+                return (encoding, utf);
+            }
+        }
+        if max < 0 {
+            // Single-byte result was garbage and the fallback wasn't
+            // the best fit.
+            encoding = self.fallback.unwrap_or(WINDOWS_1252);
         }
 
         if !self.candidates[Self::EUC_KR_INDEX].ascii_pair_ratio_ok() {
@@ -1370,6 +1414,16 @@ impl EncodingDetector {
         EncodingDetector::new_with_fallback(None)
     }
 
+    // XXX Test-only API
+    pub fn find_score(&self, encoding: &'static Encoding) -> (i64, bool) {
+        for candidate in (&self.candidates[Self::FIRST_SINGLE_BYTE..]).iter() {
+            if encoding == candidate.encoding() {
+                return (candidate.single_byte_score(), candidate.disqualified);
+            }
+        }
+        unreachable!();
+    }
+
     const UTF_8_INDEX: usize = 0;
 
     const ISO_2022_JP_INDEX: usize = 1;
@@ -1386,6 +1440,12 @@ impl EncodingDetector {
 
     const FIRST_SINGLE_BYTE: usize = 7;
 
+    const FIRST_NORMAL_SINGLE_BYTE: usize = 8;
+
+    const VISUAL_INDEX: usize = 7;
+
+    const LOGICAL_INDEX: usize = 15;
+
     pub fn new_with_fallback(fallback: Option<&'static Encoding>) -> Self {
         let mut det = EncodingDetector {
             candidates: [
@@ -1396,6 +1456,7 @@ impl EncodingDetector {
                 Candidate::new_euc_kr(),
                 Candidate::new_big5(),
                 Candidate::new_gbk(),
+                Candidate::new_visual(&SINGLE_BYTE_DATA[ISO_8859_8_INDEX]),
                 Candidate::new_cased(&SINGLE_BYTE_DATA[WINDOWS_1252_INDEX]),
                 Candidate::new_cased(&SINGLE_BYTE_DATA[WINDOWS_1251_INDEX]),
                 Candidate::new_cased(&SINGLE_BYTE_DATA[WINDOWS_1250_INDEX]),
@@ -1413,7 +1474,6 @@ impl EncodingDetector {
                 Candidate::new_cased(&SINGLE_BYTE_DATA[WINDOWS_1258_INDEX]),
                 Candidate::new_cased(&SINGLE_BYTE_DATA[ISO_8859_4_INDEX]),
                 Candidate::new_cased(&SINGLE_BYTE_DATA[ISO_8859_5_INDEX]),
-                Candidate::new_visual(&SINGLE_BYTE_DATA[ISO_8859_8_INDEX]),
             ],
             non_ascii_seen: 0,
             fallback: fallback,

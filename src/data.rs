@@ -1,27 +1,27 @@
 /* Any copyright is dedicated to the Public Domain.
  * https://creativecommons.org/publicdomain/zero/1.0/ */
 
+use super::IMPLAUSIBILITY_PENALTY;
+use super::LATIN_ADJACENCY_PENALTY;
 use encoding_rs::Encoding;
-use encoding_rs::WINDOWS_1258_INIT;
-use encoding_rs::WINDOWS_1250_INIT;
-use encoding_rs::ISO_8859_2_INIT;
-use encoding_rs::WINDOWS_1251_INIT;
-use encoding_rs::KOI8_U_INIT;
-use encoding_rs::ISO_8859_5_INIT;
 use encoding_rs::IBM866_INIT;
+use encoding_rs::ISO_8859_2_INIT;
+use encoding_rs::ISO_8859_4_INIT;
+use encoding_rs::ISO_8859_5_INIT;
+use encoding_rs::ISO_8859_6_INIT;
+use encoding_rs::ISO_8859_7_INIT;
+use encoding_rs::ISO_8859_8_INIT;
+use encoding_rs::KOI8_U_INIT;
+use encoding_rs::WINDOWS_1250_INIT;
+use encoding_rs::WINDOWS_1251_INIT;
 use encoding_rs::WINDOWS_1252_INIT;
 use encoding_rs::WINDOWS_1253_INIT;
-use encoding_rs::ISO_8859_7_INIT;
 use encoding_rs::WINDOWS_1254_INIT;
 use encoding_rs::WINDOWS_1255_INIT;
-use encoding_rs::ISO_8859_8_INIT;
 use encoding_rs::WINDOWS_1256_INIT;
-use encoding_rs::ISO_8859_6_INIT;
 use encoding_rs::WINDOWS_1257_INIT;
-use encoding_rs::ISO_8859_4_INIT;
+use encoding_rs::WINDOWS_1258_INIT;
 use encoding_rs::WINDOWS_874_INIT;
-use super::LATIN_ADJACENCY_PENALTY;
-use super::IMPLAUSIBILITY_PENALTY;
 
 #[repr(align(64))] // Align to cache lines
 struct DetectorData {
@@ -927,7 +927,7 @@ fn compute_index(
     if x == 0 && y == 0 {
         return None;
     }
-    if x == 254 || y == 254 {
+    if x == 0x7E || y == 0x7E {
         return None;
     }
     if x < ascii_classes && y < ascii_classes {
