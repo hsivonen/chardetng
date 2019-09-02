@@ -954,6 +954,11 @@ pub struct SingleByteData {
 
 impl SingleByteData {
     #[inline(always)]
+    pub fn is_ascii_class(&self, caseless_class: u8) -> bool {
+        (caseless_class as usize) < self.ascii
+    }
+
+    #[inline(always)]
     pub fn classify(&'static self, byte: u8) -> u8 {
         let high = byte >> 7;
         let low = byte & 0x7F;

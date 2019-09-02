@@ -39,7 +39,7 @@ enum Case {
     Lower,
 }
 
-struct CasedCandidate {
+struct NonLatinCasedCandidate {
     data: &'static SingleByteData,
     score: i64,
     prev: u8,
@@ -47,9 +47,9 @@ struct CasedCandidate {
     prev_ascii: bool,
 }
 
-impl CasedCandidate {
+impl NonLatinCasedCandidate {
     fn new(data: &'static SingleByteData) -> Self {
-        CasedCandidate {
+        NonLatinCasedCandidate {
             data: data,
             score: 0,
             prev: 0,
@@ -74,10 +74,70 @@ impl CasedCandidate {
                 Case::Upper
             };
             if !(self.prev_ascii && ascii) && self.prev_case == Case::Lower && case == Case::Upper {
-                // XXX How bad is this for Irish Gaelic?
                 self.score += IMPLAUSIBLE_CASE_TRANSITION_PENALTY;
             }
             self.prev_ascii = ascii;
+            self.prev_case = case;
+            self.score += self.data.score(caseless_class, self.prev);
+            self.prev = caseless_class;
+        }
+        false
+    }
+}
+
+struct LatinCandidate {
+    data: &'static SingleByteData,
+    score: i64,
+    prev: u8,
+    prev_case: Case,
+    prev_non_ascii: u32,
+}
+
+impl LatinCandidate {
+    fn new(data: &'static SingleByteData) -> Self {
+        LatinCandidate {
+            data: data,
+            score: 0,
+            prev: 0,
+            prev_case: Case::Space,
+            prev_non_ascii: 0,
+        }
+    }
+
+    fn feed(&mut self, buffer: &[u8]) -> bool {
+        for &b in buffer {
+            let class = self.data.classify(b);
+            if class == 255 {
+                return true;
+            }
+            let caseless_class = class & 0x7F;
+            let ascii = self.data.is_ascii_class(caseless_class);
+            let case = if class == 0 {
+                Case::Space
+            } else if (class >> 7) == 0 {
+                Case::Lower
+            } else {
+                Case::Upper
+            };
+            let non_ascii_penalty = match self.prev_non_ascii {
+                0 | 1 | 2 => 0,
+                3 => -5,
+                4 => -20,
+                _ => -200,
+            };
+            self.score += non_ascii_penalty;
+            if !((self.prev_non_ascii == 0) && ascii)
+                && self.prev_case == Case::Lower
+                && case == Case::Upper
+            {
+                // XXX How bad is this for Irish Gaelic?
+                self.score += IMPLAUSIBLE_CASE_TRANSITION_PENALTY;
+            }
+            if ascii {
+                self.prev_non_ascii = 0;
+            } else {
+                self.prev_non_ascii += 1;
+            }
             self.prev_case = case;
             self.score += self.data.score(caseless_class, self.prev);
             self.prev = caseless_class;
@@ -744,7 +804,8 @@ impl EucKrCandidate {
 }
 
 enum InnerCandidate {
-    Cased(CasedCandidate),
+    Latin(LatinCandidate),
+    NonLatinCased(NonLatinCasedCandidate),
     Caseless(CaselessCandidate),
     ArabicFrench(ArabicFrenchCandidate),
     Logical(LogicalCandidate),
@@ -761,7 +822,18 @@ enum InnerCandidate {
 impl InnerCandidate {
     fn feed(&mut self, buffer: &[u8], last: bool) -> bool {
         match self {
-            InnerCandidate::Cased(c) => {
+            InnerCandidate::Latin(c) => {
+                let disqualified = c.feed(buffer);
+                if disqualified {
+                    return true;
+                }
+                if last {
+                    // Treat EOF as space-like
+                    return c.feed(b" ");
+                }
+                return false;
+            }
+            InnerCandidate::NonLatinCased(c) => {
                 let disqualified = c.feed(buffer);
                 if disqualified {
                     return true;
@@ -854,9 +926,16 @@ impl Candidate {
         self.disqualified |= self.inner.feed(buffer, last);
     }
 
-    fn new_cased(data: &'static SingleByteData) -> Self {
+    fn new_latin(data: &'static SingleByteData) -> Self {
         Candidate {
-            inner: InnerCandidate::Cased(CasedCandidate::new(data)),
+            inner: InnerCandidate::Latin(LatinCandidate::new(data)),
+            disqualified: false,
+        }
+    }
+
+    fn new_non_latin_cased(data: &'static SingleByteData) -> Self {
+        Candidate {
+            inner: InnerCandidate::NonLatinCased(NonLatinCasedCandidate::new(data)),
             disqualified: false,
         }
     }
@@ -981,7 +1060,10 @@ impl Candidate {
 
     fn single_byte_score(&self) -> i64 {
         match &self.inner {
-            InnerCandidate::Cased(c) => {
+            InnerCandidate::Latin(c) => {
+                return c.score;
+            }
+            InnerCandidate::NonLatinCased(c) => {
                 return c.score;
             }
             InnerCandidate::Caseless(c) => {
@@ -1018,7 +1100,10 @@ impl Candidate {
 
     fn encoding(&self) -> &'static Encoding {
         match &self.inner {
-            InnerCandidate::Cased(c) => {
+            InnerCandidate::Latin(c) => {
+                return c.data.encoding;
+            }
+            InnerCandidate::NonLatinCased(c) => {
                 return c.data.encoding;
             }
             InnerCandidate::Caseless(c) => {
@@ -1041,7 +1126,10 @@ impl Candidate {
 
     fn increment_score(&mut self) {
         match &mut self.inner {
-            InnerCandidate::Cased(c) => {
+            InnerCandidate::Latin(c) => {
+                c.score += 1;
+            }
+            InnerCandidate::NonLatinCased(c) => {
                 c.score += 1;
             }
             InnerCandidate::Caseless(c) => {
@@ -1085,7 +1173,7 @@ impl Candidate {
     }
 
     fn ascii_pair_ratio_ok(&self) -> bool {
-        // TODO: Adjus the minimum required pair threshold on a per-encoding basis
+        // TODO: Adjust the minimum required pair threshold on a per-encoding basis
         // The ratio is for avoiding misdetecting Latin as CJK.
         // The threshold is for avoiding misdetecting non-Latin single-byte
         // as CJK.
@@ -1457,23 +1545,23 @@ impl EncodingDetector {
                 Candidate::new_big5(),
                 Candidate::new_gbk(),
                 Candidate::new_visual(&SINGLE_BYTE_DATA[ISO_8859_8_INDEX]),
-                Candidate::new_cased(&SINGLE_BYTE_DATA[WINDOWS_1252_INDEX]),
-                Candidate::new_cased(&SINGLE_BYTE_DATA[WINDOWS_1251_INDEX]),
-                Candidate::new_cased(&SINGLE_BYTE_DATA[WINDOWS_1250_INDEX]),
-                Candidate::new_cased(&SINGLE_BYTE_DATA[ISO_8859_2_INDEX]),
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1252_INDEX]),
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[WINDOWS_1251_INDEX]),
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1250_INDEX]),
+                Candidate::new_latin(&SINGLE_BYTE_DATA[ISO_8859_2_INDEX]),
                 Candidate::new_arabic_french(&SINGLE_BYTE_DATA[WINDOWS_1256_INDEX]),
-                Candidate::new_cased(&SINGLE_BYTE_DATA[WINDOWS_1254_INDEX]),
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1254_INDEX]),
                 Candidate::new_caseless(&SINGLE_BYTE_DATA[WINDOWS_874_INDEX]),
                 Candidate::new_logical(&SINGLE_BYTE_DATA[WINDOWS_1255_INDEX]),
-                Candidate::new_cased(&SINGLE_BYTE_DATA[WINDOWS_1253_INDEX]),
-                Candidate::new_cased(&SINGLE_BYTE_DATA[ISO_8859_7_INDEX]),
-                Candidate::new_cased(&SINGLE_BYTE_DATA[WINDOWS_1257_INDEX]),
-                Candidate::new_cased(&SINGLE_BYTE_DATA[KOI8_U_INDEX]),
-                Candidate::new_cased(&SINGLE_BYTE_DATA[IBM866_INDEX]),
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[WINDOWS_1253_INDEX]),
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[ISO_8859_7_INDEX]),
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1257_INDEX]),
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[KOI8_U_INDEX]),
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[IBM866_INDEX]),
                 Candidate::new_caseless(&SINGLE_BYTE_DATA[ISO_8859_6_INDEX]),
-                Candidate::new_cased(&SINGLE_BYTE_DATA[WINDOWS_1258_INDEX]),
-                Candidate::new_cased(&SINGLE_BYTE_DATA[ISO_8859_4_INDEX]),
-                Candidate::new_cased(&SINGLE_BYTE_DATA[ISO_8859_5_INDEX]),
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1258_INDEX]),
+                Candidate::new_latin(&SINGLE_BYTE_DATA[ISO_8859_4_INDEX]),
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[ISO_8859_5_INDEX]),
             ],
             non_ascii_seen: 0,
             fallback: fallback,
@@ -1546,6 +1634,6 @@ mod tests {
 
     #[test]
     fn test_foo() {
-        check("aße", WINDOWS_1252);
+        check("Straße", WINDOWS_1252);
     }
 }
