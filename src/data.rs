@@ -970,6 +970,8 @@ impl SingleByteData {
             && !((current_class as usize) < self.ascii || (previous_class as usize) < self.ascii)
         {
             LATIN_ADJACENCY_PENALTY
+        } else if (current_class == 0x7E) || (previous_class == 0x7E) {
+            0
         } else if let Some(index) = compute_index(
             usize::from(previous_class),
             usize::from(current_class),
