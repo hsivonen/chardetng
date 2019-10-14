@@ -45,6 +45,8 @@ struct NonLatinCasedCandidate {
     prev: u8,
     prev_case: Case,
     prev_ascii: bool,
+    current_word_len: u64,
+    longest_word: u64,
 }
 
 impl NonLatinCasedCandidate {
@@ -55,6 +57,8 @@ impl NonLatinCasedCandidate {
             prev: 0,
             prev_case: Case::Space,
             prev_ascii: true,
+            current_word_len: 0,
+            longest_word: 0,
         }
     }
 
@@ -73,6 +77,15 @@ impl NonLatinCasedCandidate {
             } else {
                 Case::Upper
             };
+            // Count only non-Latin word length
+            if class != 0 && caseless_class < 0x7E {
+                self.current_word_len += 1;
+            } else {
+                if self.current_word_len > self.longest_word {
+                    self.longest_word = self.current_word_len;
+                }
+                self.current_word_len = 0;
+            }
             if !(self.prev_ascii && ascii) && self.prev_case == Case::Lower && case == Case::Upper {
                 self.score += IMPLAUSIBLE_CASE_TRANSITION_PENALTY;
             }
@@ -152,6 +165,8 @@ struct ArabicFrenchCandidate {
     prev: u8,
     prev_case: Case,
     prev_ascii: bool,
+    current_word_len: u64,
+    longest_word: u64,
 }
 
 impl ArabicFrenchCandidate {
@@ -162,6 +177,8 @@ impl ArabicFrenchCandidate {
             prev: 0,
             prev_case: Case::Space,
             prev_ascii: true,
+            current_word_len: 0,
+            longest_word: 0,
         }
     }
 
@@ -180,6 +197,15 @@ impl ArabicFrenchCandidate {
             } else {
                 Case::Upper
             };
+            // Count only Arabic word length and ignore French
+            if class != 0 && class < 0x7E {
+                self.current_word_len += 1;
+            } else {
+                if self.current_word_len > self.longest_word {
+                    self.longest_word = self.current_word_len;
+                }
+                self.current_word_len = 0;
+            }
             if !(self.prev_ascii && ascii) && self.prev_case == Case::Lower && case == Case::Upper {
                 self.score += IMPLAUSIBLE_CASE_TRANSITION_PENALTY;
             }
@@ -196,6 +222,8 @@ struct CaselessCandidate {
     data: &'static SingleByteData,
     score: i64,
     prev: u8,
+    current_word_len: u64,
+    longest_word: u64,
 }
 
 impl CaselessCandidate {
@@ -204,6 +232,8 @@ impl CaselessCandidate {
             data: data,
             score: 0,
             prev: 0,
+            current_word_len: 0,
+            longest_word: 0,
         }
     }
 
@@ -214,6 +244,15 @@ impl CaselessCandidate {
                 return true;
             }
             let caseless_class = class & 0x7F;
+            // Count only non-Latin word length
+            if class != 0 && caseless_class < 0x7E {
+                self.current_word_len += 1;
+            } else {
+                if self.current_word_len > self.longest_word {
+                    self.longest_word = self.current_word_len;
+                }
+                self.current_word_len = 0;
+            }
             self.score += self.data.score(caseless_class, self.prev);
             self.prev = caseless_class;
         }
@@ -226,6 +265,8 @@ struct LogicalCandidate {
     score: i64,
     prev: u8,
     plausible_punctuation: u64,
+    current_word_len: u64,
+    longest_word: u64,
 }
 
 impl LogicalCandidate {
@@ -235,6 +276,8 @@ impl LogicalCandidate {
             score: 0,
             prev: 0,
             plausible_punctuation: 0,
+            current_word_len: 0,
+            longest_word: 0,
         }
     }
 
@@ -248,6 +291,15 @@ impl LogicalCandidate {
             if !(self.prev == 0 || self.prev == 0x7E) && caseless_class == 1 {
                 self.plausible_punctuation += 1;
             }
+            // Count only non-Latin word length
+            if class != 0 && caseless_class < 0x7E {
+                self.current_word_len += 1;
+            } else {
+                if self.current_word_len > self.longest_word {
+                    self.longest_word = self.current_word_len;
+                }
+                self.current_word_len = 0;
+            }
             self.score += self.data.score(caseless_class, self.prev);
             self.prev = caseless_class;
         }
@@ -260,6 +312,8 @@ struct VisualCandidate {
     score: i64,
     prev: u8,
     plausible_punctuation: u64,
+    current_word_len: u64,
+    longest_word: u64,
 }
 
 impl VisualCandidate {
@@ -269,6 +323,8 @@ impl VisualCandidate {
             score: 0,
             prev: 0,
             plausible_punctuation: 0,
+            current_word_len: 0,
+            longest_word: 0,
         }
     }
 
@@ -281,6 +337,15 @@ impl VisualCandidate {
             let caseless_class = class & 0x7F;
             if !(caseless_class == 0 || caseless_class == 0x7E) && self.prev == 1 {
                 self.plausible_punctuation += 1;
+            }
+            // Count only non-Latin word length
+            if class != 0 && caseless_class < 0x7E {
+                self.current_word_len += 1;
+            } else {
+                if self.current_word_len > self.longest_word {
+                    self.longest_word = self.current_word_len;
+                }
+                self.current_word_len = 0;
             }
             self.score += self.data.score(self.prev, caseless_class);
             self.prev = caseless_class;
@@ -390,9 +455,9 @@ impl GbkCandidate {
                     // assumption that since they complete logical sequences
                     // they might be supported by other fonts, too.
                     match u {
-                        0xE78D...0xE793
-                        | 0xE794...0xE796
-                        | 0xE816...0xE818
+                        0xE78D..=0xE793
+                        | 0xE794..=0xE796
+                        | 0xE816..=0xE818
                         | 0xE81E
                         | 0xE826
                         | 0xE82B
@@ -1064,19 +1129,34 @@ impl Candidate {
                 return c.score;
             }
             InnerCandidate::NonLatinCased(c) => {
-                return c.score;
+                if c.longest_word >= 3 {
+                    return c.score;
+                }
+                return i64::min_value();
             }
             InnerCandidate::Caseless(c) => {
-                return c.score;
+                if c.longest_word >= 3 {
+                    return c.score;
+                }
+                return i64::min_value();
             }
             InnerCandidate::ArabicFrench(c) => {
-                return c.score;
+                if c.longest_word >= 3 {
+                    return c.score;
+                }
+                return i64::min_value();
             }
             InnerCandidate::Logical(c) => {
-                return c.score;
+                if c.longest_word >= 3 {
+                    return c.score;
+                }
+                return i64::min_value();
             }
             InnerCandidate::Visual(c) => {
-                return c.score;
+                if c.longest_word >= 3 {
+                    return c.score;
+                }
+                return i64::min_value();
             }
             _ => {
                 unreachable!();
@@ -1124,25 +1204,25 @@ impl Candidate {
         }
     }
 
-    fn increment_score(&mut self) {
+    fn add_to_score(&mut self, delta: i64) {
         match &mut self.inner {
             InnerCandidate::Latin(c) => {
-                c.score += 1;
+                c.score += delta;
             }
             InnerCandidate::NonLatinCased(c) => {
-                c.score += 1;
+                c.score += delta;
             }
             InnerCandidate::Caseless(c) => {
-                c.score += 1;
+                c.score += delta;
             }
             InnerCandidate::ArabicFrench(c) => {
-                c.score += 1;
+                c.score += delta;
             }
             InnerCandidate::Logical(c) => {
-                c.score += 1;
+                c.score += delta;
             }
             InnerCandidate::Visual(c) => {
-                c.score += 1;
+                c.score += delta;
             }
             _ => {
                 unreachable!();
@@ -1306,7 +1386,7 @@ impl EncodingDetector {
             return (ISO_2022_JP, false);
         }
 
-        let utf = !self.candidates[Self::UTF_8_INDEX].disqualified;
+        let utf = !self.candidates[Self::UTF_8_INDEX].disqualified && self.non_ascii_seen > 0;
 
         let mut euc_kr_ok = !self.candidates[Self::EUC_KR_INDEX].disqualified;
         let mut big5_ok = !self.candidates[Self::BIG5_INDEX].disqualified;
@@ -1355,12 +1435,12 @@ impl EncodingDetector {
         let mut max = i64::min_value();
         for candidate in (&self.candidates[Self::FIRST_NORMAL_SINGLE_BYTE..]).iter() {
             let score = candidate.single_byte_score();
-            println!(
-                "{} {} {}",
-                candidate.encoding().name(),
-                score,
-                candidate.disqualified
-            );
+            // println!(
+            //     "{} {} {}",
+            //     candidate.encoding().name(),
+            //     score,
+            //     candidate.disqualified
+            // );
             if !candidate.disqualified && score > max {
                 max = score;
                 encoding = candidate.encoding();
@@ -1534,44 +1614,81 @@ impl EncodingDetector {
 
     const LOGICAL_INDEX: usize = 15;
 
+    const WINDOWS_1250_SINGLE_BYTE: usize = 10;
+
+    const WINDOWS_1251_SINGLE_BYTE: usize = 9;
+
+    const WINDOWS_1252_SINGLE_BYTE: usize = 8;
+
+    const WINDOWS_1253_SINGLE_BYTE: usize = 16;
+
+    const WINDOWS_1254_SINGLE_BYTE: usize = 13;
+
+    const WINDOWS_1255_SINGLE_BYTE: usize = 15;
+
+    const WINDOWS_1256_SINGLE_BYTE: usize = 12;
+
+    const WINDOWS_1257_SINGLE_BYTE: usize = 18;
+
+    const WINDOWS_1258_SINGLE_BYTE: usize = 22;
+    
+    const ISO_8859_3_SINGLE_BYTE: usize = 11;
+    
+    const ISO_8859_4_SINGLE_BYTE: usize = 23;
+    
+    const ISO_8859_5_SINGLE_BYTE: usize = 24;
+    
+    const ISO_8859_6_SINGLE_BYTE: usize = 21;
+
     pub fn new_with_fallback(fallback: Option<&'static Encoding>) -> Self {
         let mut det = EncodingDetector {
             candidates: [
-                Candidate::new_utf_8(),
-                Candidate::new_iso_2022_jp(),
-                Candidate::new_shift_jis(),
-                Candidate::new_euc_jp(),
-                Candidate::new_euc_kr(),
-                Candidate::new_big5(),
-                Candidate::new_gbk(),
-                Candidate::new_visual(&SINGLE_BYTE_DATA[ISO_8859_8_INDEX]),
-                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1252_INDEX]),
-                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[WINDOWS_1251_INDEX]),
-                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1250_INDEX]),
-                Candidate::new_latin(&SINGLE_BYTE_DATA[ISO_8859_2_INDEX]),
-                Candidate::new_arabic_french(&SINGLE_BYTE_DATA[WINDOWS_1256_INDEX]),
-                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1254_INDEX]),
-                Candidate::new_caseless(&SINGLE_BYTE_DATA[WINDOWS_874_INDEX]),
-                Candidate::new_logical(&SINGLE_BYTE_DATA[WINDOWS_1255_INDEX]),
-                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[WINDOWS_1253_INDEX]),
-                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[ISO_8859_7_INDEX]),
-                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1257_INDEX]),
-                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[KOI8_U_INDEX]),
-                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[IBM866_INDEX]),
-                Candidate::new_caseless(&SINGLE_BYTE_DATA[ISO_8859_6_INDEX]),
-                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1258_INDEX]),
-                Candidate::new_latin(&SINGLE_BYTE_DATA[ISO_8859_4_INDEX]),
-                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[ISO_8859_5_INDEX]),
+                Candidate::new_utf_8(), // 0
+                Candidate::new_iso_2022_jp(), // 1
+                Candidate::new_shift_jis(), // 2
+                Candidate::new_euc_jp(), // 3
+                Candidate::new_euc_kr(), // 4
+                Candidate::new_big5(), // 5
+                Candidate::new_gbk(), // 6
+                Candidate::new_visual(&SINGLE_BYTE_DATA[ISO_8859_8_INDEX]), // 7
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1252_INDEX]), // 8
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[WINDOWS_1251_INDEX]), // 9
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1250_INDEX]), // 10
+                Candidate::new_latin(&SINGLE_BYTE_DATA[ISO_8859_2_INDEX]), // 11
+                Candidate::new_arabic_french(&SINGLE_BYTE_DATA[WINDOWS_1256_INDEX]), // 12
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1254_INDEX]), // 13
+                Candidate::new_caseless(&SINGLE_BYTE_DATA[WINDOWS_874_INDEX]), // 14
+                Candidate::new_logical(&SINGLE_BYTE_DATA[WINDOWS_1255_INDEX]), // 15
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[WINDOWS_1253_INDEX]), // 16
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[ISO_8859_7_INDEX]), // 17
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1257_INDEX]), // 18
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[KOI8_U_INDEX]), // 19
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[IBM866_INDEX]), // 20
+                Candidate::new_caseless(&SINGLE_BYTE_DATA[ISO_8859_6_INDEX]), // 21
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1258_INDEX]), // 22
+                Candidate::new_latin(&SINGLE_BYTE_DATA[ISO_8859_4_INDEX]), // 23
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[ISO_8859_5_INDEX]), // 24
             ],
             non_ascii_seen: 0,
             fallback: fallback,
             last_before_non_ascii: None,
             esc_seen: false,
         };
+        // When in doubt, guess windows-1252
+        det.candidates[Self::WINDOWS_1252_SINGLE_BYTE].add_to_score(10);
+
+        // It's questionable whether ISO-8859-4 should even be a possible outcome.
+        det.candidates[Self::ISO_8859_4_SINGLE_BYTE].add_to_score(-10);
+        // For short strings, windows-1257 gets confused with windows-1252 a lot
+        det.candidates[Self::WINDOWS_1257_SINGLE_BYTE].add_to_score(0);
+
+        // For short strings, windows-1250 gets confused with windows-1252 a lot
+        det.candidates[Self::WINDOWS_1250_SINGLE_BYTE].add_to_score(0);
+
         if let Some(fallback) = fallback {
             for single_byte in det.candidates[Self::FIRST_SINGLE_BYTE..].iter_mut() {
                 if single_byte.encoding() == fallback {
-                    single_byte.increment_score();
+                    single_byte.add_to_score(1);
                     break;
                 }
             }
