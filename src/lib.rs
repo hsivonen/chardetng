@@ -30,20 +30,58 @@ use data::*;
 
 const LATIN_ADJACENCY_PENALTY: i64 = -40;
 const IMPLAUSIBILITY_PENALTY: i64 = -200;
-const IMPLAUSIBLE_CASE_TRANSITION_PENALTY: i64 = -100;
 
+const IMPLAUSIBLE_LATIN_CASE_TRANSITION_PENALTY: i64 = -100;
+
+const NON_LATIN_CAPITALIZATION_BONUS: i64 = 40;
+
+const NON_LATIN_ALL_CAPS_PENALTY: i64 = -40;
+
+const NON_LATIN_MIXED_CASE_PENALTY: i64 = -10;
+
+const NON_LATIN_CAMEL_PENALTY: i64 = -30;
+
+const NON_LATIN_IMPLAUSIBLE_CASE_TRANSITION_PENALTY: i64 = -100;
+
+/// Latin letter caseless class
+const LATIN_LETTER: u8 = 2;
+
+/// ASCII punctionation caseless class for Hebrew
+const ASCII_PUNCTUATION: u8 = 3;
+
+// For Latin, we only penalize pairwise bad transitions
+// if one participant is non-ASCII. This avoids violating
+// the principle that ASCII pairs never contribute to the
+// score. (Maybe that's a bad principle, though!)
 #[derive(PartialEq)]
-enum Case {
+enum LatinCaseState {
     Space,
     Upper,
     Lower,
+    AllCaps,
+}
+
+// Fon non-Latin, we calculate case-related penalty
+// or bonus on a per-non-Latin-word basis.
+#[derive(PartialEq)]
+enum NonLatinCaseState {
+    Space,
+    Upper,
+    Lower,
+    UpperLower,
+    LowerUpper,
+    LowerUpperUpper,
+    LowerUpperLower,
+    UpperLowerCamel, // State like UpperLower but has been through something else
+    AllCaps,
+    Mix,
 }
 
 struct NonLatinCasedCandidate {
     data: &'static SingleByteData,
     score: i64,
     prev: u8,
-    prev_case: Case,
+    case_state: NonLatinCaseState,
     prev_ascii: bool,
     current_word_len: u64,
     longest_word: u64,
@@ -55,7 +93,7 @@ impl NonLatinCasedCandidate {
             data: data,
             score: 0,
             prev: 0,
-            prev_case: Case::Space,
+            case_state: NonLatinCaseState::Space,
             prev_ascii: true,
             current_word_len: 0,
             longest_word: 0,
@@ -69,16 +107,127 @@ impl NonLatinCasedCandidate {
                 return true;
             }
             let caseless_class = class & 0x7F;
+
             let ascii = b < 0x80;
-            let case = if class == 0 {
-                Case::Space
+            let ascii_pair = self.prev_ascii && ascii;
+
+            let non_ascii_alphabetic = self.data.is_non_latin_alphabetic(caseless_class);
+
+            // The purpose of this state machine is to avoid misdetecting Greek as
+            // Cyrillic by:
+            //
+            // * Giving a small bonus to words that start with an upper-case letter
+            //   and are lower-case for the rest.
+            // * Giving a large penalty to start with one lower-case letter followed
+            //   by all upper-case (obviously upper and lower case inverted, which
+            //   unfortunately is possible due to KOI8-U).
+            // * Giving a small per-word penalty to all-uppercase (to favor
+            //   all-lowercase Greek over all-caps KOI8-U).
+            // * Giving large penalties for random mixed-case while making the
+            //   penalties for CamelCase recoverable. Going easy on CamelCase
+            //   might not actually be necessary.
+
+            // ASCII doesn't participate in non-Latin casing.
+            if caseless_class == LATIN_LETTER {
+                // Latin
+                // Mark this word as a mess. If there end up being non-Latin
+                // letters in this word, the ASCII-adjacency penalty gets
+                // applied to Latin/non-Latin pairs and the mix penalty
+                // to non-Latin/non-Latin pairs.
+                self.case_state = NonLatinCaseState::Mix;
+            } else if !non_ascii_alphabetic {
+                // Space
+                match self.case_state {
+                    NonLatinCaseState::Space
+                    | NonLatinCaseState::Upper
+                    | NonLatinCaseState::Lower
+                    | NonLatinCaseState::UpperLowerCamel => {}
+                    NonLatinCaseState::UpperLower => {
+                        // Intentionally applied only once per word.
+                        self.score += NON_LATIN_CAPITALIZATION_BONUS;
+                    }
+                    NonLatinCaseState::LowerUpper => {
+                        // Once per word
+                        self.score = NON_LATIN_IMPLAUSIBLE_CASE_TRANSITION_PENALTY;
+                    }
+                    NonLatinCaseState::LowerUpperLower => {
+                        // Once per word
+                        self.score += NON_LATIN_CAMEL_PENALTY;
+                    }
+                    NonLatinCaseState::AllCaps => {
+                        // Intentionally applied only once per word.
+                        self.score += NON_LATIN_ALL_CAPS_PENALTY;
+                    }
+                    NonLatinCaseState::Mix | NonLatinCaseState::LowerUpperUpper => {
+                        // Per letter
+                        self.score += NON_LATIN_MIXED_CASE_PENALTY;
+                    }
+                }
+                self.case_state = NonLatinCaseState::Space;
             } else if (class >> 7) == 0 {
-                Case::Lower
+                // Lower case
+                match self.case_state {
+                    NonLatinCaseState::Space => {
+                        self.case_state = NonLatinCaseState::Lower;
+                    }
+                    NonLatinCaseState::Upper => {
+                        self.case_state = NonLatinCaseState::UpperLower;
+                    }
+                    NonLatinCaseState::Lower
+                    | NonLatinCaseState::UpperLower
+                    | NonLatinCaseState::UpperLowerCamel => {}
+                    NonLatinCaseState::LowerUpper => {
+                        self.score += NON_LATIN_CAMEL_PENALTY;
+                        self.case_state = NonLatinCaseState::LowerUpperLower;
+                    }
+                    NonLatinCaseState::LowerUpperUpper => {
+                        self.score += NON_LATIN_MIXED_CASE_PENALTY;
+                        self.case_state = NonLatinCaseState::Mix;
+                    }
+                    NonLatinCaseState::LowerUpperLower => {
+                        self.score += NON_LATIN_CAMEL_PENALTY;
+                        self.case_state = NonLatinCaseState::UpperLowerCamel;
+                    }
+                    NonLatinCaseState::AllCaps => {
+                        self.score = NON_LATIN_IMPLAUSIBLE_CASE_TRANSITION_PENALTY;
+                        self.case_state = NonLatinCaseState::Mix;
+                    }
+                    NonLatinCaseState::Mix => {
+                        self.score += NON_LATIN_MIXED_CASE_PENALTY;
+                    }
+                }
             } else {
-                Case::Upper
-            };
-            // Count only non-Latin word length
-            if class != 0 && caseless_class < 0x7E {
+                // Upper case
+                match self.case_state {
+                    NonLatinCaseState::Space => {
+                        self.case_state = NonLatinCaseState::Upper;
+                    }
+                    NonLatinCaseState::Upper => {
+                        self.case_state = NonLatinCaseState::AllCaps;
+                    }
+                    NonLatinCaseState::Lower
+                    | NonLatinCaseState::UpperLower
+                    | NonLatinCaseState::UpperLowerCamel => {
+                        // No penalty, yet. The next transition decides how much.
+                        self.case_state = NonLatinCaseState::LowerUpper;
+                    }
+                    NonLatinCaseState::LowerUpper => {
+                        // Once per word
+                        self.score = NON_LATIN_IMPLAUSIBLE_CASE_TRANSITION_PENALTY;
+                        self.case_state = NonLatinCaseState::LowerUpperUpper;
+                    }
+                    NonLatinCaseState::LowerUpperUpper | NonLatinCaseState::Mix => {
+                        self.score += NON_LATIN_MIXED_CASE_PENALTY;
+                    }
+                    NonLatinCaseState::LowerUpperLower => {
+                        self.score = NON_LATIN_IMPLAUSIBLE_CASE_TRANSITION_PENALTY;
+                        self.case_state = NonLatinCaseState::Mix;
+                    }
+                    NonLatinCaseState::AllCaps => {}
+                }
+            }
+
+            if non_ascii_alphabetic {
                 self.current_word_len += 1;
             } else {
                 if self.current_word_len > self.longest_word {
@@ -86,12 +235,20 @@ impl NonLatinCasedCandidate {
                 }
                 self.current_word_len = 0;
             }
-            if !(self.prev_ascii && ascii) && self.prev_case == Case::Lower && case == Case::Upper {
-                self.score += IMPLAUSIBLE_CASE_TRANSITION_PENALTY;
+
+            if !ascii_pair {
+                self.score += self.data.score(caseless_class, self.prev);
+
+                if self.prev == LATIN_LETTER && non_ascii_alphabetic {
+                    self.score += LATIN_ADJACENCY_PENALTY;
+                } else if caseless_class == LATIN_LETTER
+                    && self.data.is_non_latin_alphabetic(self.prev)
+                {
+                    self.score += LATIN_ADJACENCY_PENALTY;
+                }
             }
+
             self.prev_ascii = ascii;
-            self.prev_case = case;
-            self.score += self.data.score(caseless_class, self.prev);
             self.prev = caseless_class;
         }
         false
@@ -102,7 +259,7 @@ struct LatinCandidate {
     data: &'static SingleByteData,
     score: i64,
     prev: u8,
-    prev_case: Case,
+    case_state: LatinCaseState,
     prev_non_ascii: u32,
 }
 
@@ -112,7 +269,7 @@ impl LatinCandidate {
             data: data,
             score: 0,
             prev: 0,
-            prev_case: Case::Space,
+            case_state: LatinCaseState::Space,
             prev_non_ascii: 0,
         }
     }
@@ -124,14 +281,10 @@ impl LatinCandidate {
                 return true;
             }
             let caseless_class = class & 0x7F;
-            let ascii = self.data.is_ascii_class(caseless_class);
-            let case = if class == 0 {
-                Case::Space
-            } else if (class >> 7) == 0 {
-                Case::Lower
-            } else {
-                Case::Upper
-            };
+
+            let ascii = b < 0x80;
+            let ascii_pair = self.prev_non_ascii == 0 && ascii;
+
             let non_ascii_penalty = match self.prev_non_ascii {
                 0 | 1 | 2 => 0,
                 3 => -5,
@@ -139,20 +292,44 @@ impl LatinCandidate {
                 _ => -200,
             };
             self.score += non_ascii_penalty;
-            if !((self.prev_non_ascii == 0) && ascii)
-                && self.prev_case == Case::Lower
-                && case == Case::Upper
-            {
-                // XXX How bad is this for Irish Gaelic?
-                self.score += IMPLAUSIBLE_CASE_TRANSITION_PENALTY;
+
+            if !self.data.is_latin_alphabetic(caseless_class) {
+                self.case_state = LatinCaseState::Space;
+            } else if (class >> 7) == 0 {
+                // Penalizing lower case after two upper case
+                // is important for avoiding misdetecting
+                // windows-1250 as windows-1252 (byte 0x9F).
+                if self.case_state == LatinCaseState::AllCaps && !ascii_pair {
+                    self.score += IMPLAUSIBLE_LATIN_CASE_TRANSITION_PENALTY;
+                }
+                self.case_state = LatinCaseState::Lower;
+            } else {
+                match self.case_state {
+                    LatinCaseState::Space => {
+                        self.case_state = LatinCaseState::Upper;
+                    }
+                    LatinCaseState::Upper | LatinCaseState::AllCaps => {
+                        self.case_state = LatinCaseState::AllCaps;
+                    }
+                    LatinCaseState::Lower => {
+                        if !ascii_pair {
+                            // XXX How bad is this for Irish Gaelic?
+                            self.score += IMPLAUSIBLE_LATIN_CASE_TRANSITION_PENALTY;
+                        }
+                        self.case_state = LatinCaseState::Upper;
+                    }
+                }
             }
+
+            if !ascii_pair {
+                self.score += self.data.score(caseless_class, self.prev);
+            }
+
             if ascii {
                 self.prev_non_ascii = 0;
             } else {
                 self.prev_non_ascii += 1;
             }
-            self.prev_case = case;
-            self.score += self.data.score(caseless_class, self.prev);
             self.prev = caseless_class;
         }
         false
@@ -163,7 +340,7 @@ struct ArabicFrenchCandidate {
     data: &'static SingleByteData,
     score: i64,
     prev: u8,
-    prev_case: Case,
+    case_state: LatinCaseState,
     prev_ascii: bool,
     current_word_len: u64,
     longest_word: u64,
@@ -175,7 +352,7 @@ impl ArabicFrenchCandidate {
             data: data,
             score: 0,
             prev: 0,
-            prev_case: Case::Space,
+            case_state: LatinCaseState::Space,
             prev_ascii: true,
             current_word_len: 0,
             longest_word: 0,
@@ -189,16 +366,38 @@ impl ArabicFrenchCandidate {
                 return true;
             }
             let caseless_class = class & 0x7F;
+
             let ascii = b < 0x80;
-            let case = if caseless_class != 0x7E {
-                Case::Space
+            let ascii_pair = self.prev_ascii && ascii;
+
+            if caseless_class != LATIN_LETTER {
+                // We compute case penalties for French only
+                self.case_state = LatinCaseState::Space;
             } else if (class >> 7) == 0 {
-                Case::Lower
+                if self.case_state == LatinCaseState::AllCaps && !ascii_pair {
+                    self.score += IMPLAUSIBLE_LATIN_CASE_TRANSITION_PENALTY;
+                }
+                self.case_state = LatinCaseState::Lower;
             } else {
-                Case::Upper
-            };
+                match self.case_state {
+                    LatinCaseState::Space => {
+                        self.case_state = LatinCaseState::Upper;
+                    }
+                    LatinCaseState::Upper | LatinCaseState::AllCaps => {
+                        self.case_state = LatinCaseState::AllCaps;
+                    }
+                    LatinCaseState::Lower => {
+                        if !ascii_pair {
+                            self.score += IMPLAUSIBLE_LATIN_CASE_TRANSITION_PENALTY;
+                        }
+                        self.case_state = LatinCaseState::Upper;
+                    }
+                }
+            }
+
             // Count only Arabic word length and ignore French
-            if class != 0 && class < 0x7E {
+            let non_ascii_alphabetic = self.data.is_non_latin_alphabetic(caseless_class);
+            if non_ascii_alphabetic {
                 self.current_word_len += 1;
             } else {
                 if self.current_word_len > self.longest_word {
@@ -206,12 +405,20 @@ impl ArabicFrenchCandidate {
                 }
                 self.current_word_len = 0;
             }
-            if !(self.prev_ascii && ascii) && self.prev_case == Case::Lower && case == Case::Upper {
-                self.score += IMPLAUSIBLE_CASE_TRANSITION_PENALTY;
+
+            if !ascii_pair {
+                self.score += self.data.score(caseless_class, self.prev);
+
+                if self.prev == LATIN_LETTER && non_ascii_alphabetic {
+                    self.score += LATIN_ADJACENCY_PENALTY;
+                } else if caseless_class == LATIN_LETTER
+                    && self.data.is_non_latin_alphabetic(self.prev)
+                {
+                    self.score += LATIN_ADJACENCY_PENALTY;
+                }
             }
+
             self.prev_ascii = ascii;
-            self.prev_case = case;
-            self.score += self.data.score(caseless_class, self.prev);
             self.prev = caseless_class;
         }
         false
@@ -222,6 +429,7 @@ struct CaselessCandidate {
     data: &'static SingleByteData,
     score: i64,
     prev: u8,
+    prev_ascii: bool,
     current_word_len: u64,
     longest_word: u64,
 }
@@ -232,6 +440,7 @@ impl CaselessCandidate {
             data: data,
             score: 0,
             prev: 0,
+            prev_ascii: true,
             current_word_len: 0,
             longest_word: 0,
         }
@@ -244,8 +453,12 @@ impl CaselessCandidate {
                 return true;
             }
             let caseless_class = class & 0x7F;
-            // Count only non-Latin word length
-            if class != 0 && caseless_class < 0x7E {
+
+            let ascii = b < 0x80;
+            let ascii_pair = self.prev_ascii && ascii;
+
+            let non_ascii_alphabetic = self.data.is_non_latin_alphabetic(caseless_class);
+            if non_ascii_alphabetic {
                 self.current_word_len += 1;
             } else {
                 if self.current_word_len > self.longest_word {
@@ -253,7 +466,20 @@ impl CaselessCandidate {
                 }
                 self.current_word_len = 0;
             }
-            self.score += self.data.score(caseless_class, self.prev);
+
+            if !ascii_pair {
+                self.score += self.data.score(caseless_class, self.prev);
+
+                if self.prev == LATIN_LETTER && non_ascii_alphabetic {
+                    self.score += LATIN_ADJACENCY_PENALTY;
+                } else if caseless_class == LATIN_LETTER
+                    && self.data.is_non_latin_alphabetic(self.prev)
+                {
+                    self.score += LATIN_ADJACENCY_PENALTY;
+                }
+            }
+
+            self.prev_ascii = ascii;
             self.prev = caseless_class;
         }
         false
@@ -264,6 +490,7 @@ struct LogicalCandidate {
     data: &'static SingleByteData,
     score: i64,
     prev: u8,
+    prev_ascii: bool,
     plausible_punctuation: u64,
     current_word_len: u64,
     longest_word: u64,
@@ -275,6 +502,7 @@ impl LogicalCandidate {
             data: data,
             score: 0,
             prev: 0,
+            prev_ascii: true,
             plausible_punctuation: 0,
             current_word_len: 0,
             longest_word: 0,
@@ -288,11 +516,12 @@ impl LogicalCandidate {
                 return true;
             }
             let caseless_class = class & 0x7F;
-            if !(self.prev == 0 || self.prev == 0x7E) && caseless_class == 1 {
-                self.plausible_punctuation += 1;
-            }
-            // Count only non-Latin word length
-            if class != 0 && caseless_class < 0x7E {
+
+            let ascii = b < 0x80;
+            let ascii_pair = self.prev_ascii && ascii;
+
+            let non_ascii_alphabetic = self.data.is_non_latin_alphabetic(caseless_class);
+            if non_ascii_alphabetic {
                 self.current_word_len += 1;
             } else {
                 if self.current_word_len > self.longest_word {
@@ -300,7 +529,23 @@ impl LogicalCandidate {
                 }
                 self.current_word_len = 0;
             }
-            self.score += self.data.score(caseless_class, self.prev);
+
+            if !ascii_pair {
+                self.score += self.data.score(caseless_class, self.prev);
+
+                let prev_non_ascii_alphabetic = self.data.is_non_latin_alphabetic(self.prev);
+                if caseless_class == ASCII_PUNCTUATION && prev_non_ascii_alphabetic {
+                    self.plausible_punctuation += 1;
+                }
+
+                if self.prev == LATIN_LETTER && non_ascii_alphabetic {
+                    self.score += LATIN_ADJACENCY_PENALTY;
+                } else if caseless_class == LATIN_LETTER && prev_non_ascii_alphabetic {
+                    self.score += LATIN_ADJACENCY_PENALTY;
+                }
+            }
+
+            self.prev_ascii = ascii;
             self.prev = caseless_class;
         }
         false
@@ -311,6 +556,7 @@ struct VisualCandidate {
     data: &'static SingleByteData,
     score: i64,
     prev: u8,
+    prev_ascii: bool,
     plausible_punctuation: u64,
     current_word_len: u64,
     longest_word: u64,
@@ -322,6 +568,7 @@ impl VisualCandidate {
             data: data,
             score: 0,
             prev: 0,
+            prev_ascii: true,
             plausible_punctuation: 0,
             current_word_len: 0,
             longest_word: 0,
@@ -335,11 +582,12 @@ impl VisualCandidate {
                 return true;
             }
             let caseless_class = class & 0x7F;
-            if !(caseless_class == 0 || caseless_class == 0x7E) && self.prev == 1 {
-                self.plausible_punctuation += 1;
-            }
-            // Count only non-Latin word length
-            if class != 0 && caseless_class < 0x7E {
+
+            let ascii = b < 0x80;
+            let ascii_pair = self.prev_ascii && ascii;
+
+            let non_ascii_alphabetic = self.data.is_non_latin_alphabetic(caseless_class);
+            if non_ascii_alphabetic {
                 self.current_word_len += 1;
             } else {
                 if self.current_word_len > self.longest_word {
@@ -347,7 +595,24 @@ impl VisualCandidate {
                 }
                 self.current_word_len = 0;
             }
-            self.score += self.data.score(self.prev, caseless_class);
+
+            if !ascii_pair {
+                self.score += self.data.score(caseless_class, self.prev);
+
+                if non_ascii_alphabetic && self.prev == ASCII_PUNCTUATION {
+                    self.plausible_punctuation += 1;
+                }
+
+                if self.prev == LATIN_LETTER && non_ascii_alphabetic {
+                    self.score += LATIN_ADJACENCY_PENALTY;
+                } else if caseless_class == LATIN_LETTER
+                    && self.data.is_non_latin_alphabetic(self.prev)
+                {
+                    self.score += LATIN_ADJACENCY_PENALTY;
+                }
+            }
+
+            self.prev_ascii = ascii;
             self.prev = caseless_class;
         }
         false
@@ -1589,7 +1854,7 @@ impl EncodingDetector {
                 return (candidate.single_byte_score(), candidate.disqualified);
             }
         }
-        unreachable!();
+        (0, false)
     }
 
     const UTF_8_INDEX: usize = 0;
@@ -1675,15 +1940,15 @@ impl EncodingDetector {
             esc_seen: false,
         };
         // When in doubt, guess windows-1252
-        det.candidates[Self::WINDOWS_1252_SINGLE_BYTE].add_to_score(10);
+        // det.candidates[Self::WINDOWS_1252_SINGLE_BYTE].add_to_score(10);
 
         // It's questionable whether ISO-8859-4 should even be a possible outcome.
-        det.candidates[Self::ISO_8859_4_SINGLE_BYTE].add_to_score(-10);
+        // det.candidates[Self::ISO_8859_4_SINGLE_BYTE].add_to_score(-10);
         // For short strings, windows-1257 gets confused with windows-1252 a lot
-        det.candidates[Self::WINDOWS_1257_SINGLE_BYTE].add_to_score(0);
+        // det.candidates[Self::WINDOWS_1257_SINGLE_BYTE].add_to_score(0);
 
         // For short strings, windows-1250 gets confused with windows-1252 a lot
-        det.candidates[Self::WINDOWS_1250_SINGLE_BYTE].add_to_score(0);
+        // det.candidates[Self::WINDOWS_1250_SINGLE_BYTE].add_to_score(0);
 
         if let Some(fallback) = fallback {
             for single_byte in det.candidates[Self::FIRST_SINGLE_BYTE..].iter_mut() {
@@ -1715,7 +1980,7 @@ mod tests {
         let mut det = EncodingDetector::new();
         let (enc, utf, non_ascii) = det.feed(b"", true);
         assert_eq!(enc, WINDOWS_1252);
-        assert!(utf);
+        assert!(!utf);
         assert_eq!(non_ascii, 0);
     }
 
