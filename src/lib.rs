@@ -121,7 +121,7 @@ impl NonLatinCasedCandidate {
             // * Giving a large penalty to start with one lower-case letter followed
             //   by all upper-case (obviously upper and lower case inverted, which
             //   unfortunately is possible due to KOI8-U).
-            // * Giving a small per-word penalty to all-uppercase (to favor
+            // * Giving a small per-word penalty to all-uppercase KOI8-U (to favor
             //   all-lowercase Greek over all-caps KOI8-U).
             // * Giving large penalties for random mixed-case while making the
             //   penalties for CamelCase recoverable. Going easy on CamelCase
@@ -156,7 +156,10 @@ impl NonLatinCasedCandidate {
                     }
                     NonLatinCaseState::AllCaps => {
                         // Intentionally applied only once per word.
-                        self.score += NON_LATIN_ALL_CAPS_PENALTY;
+                        if self.data == &SINGLE_BYTE_DATA[KOI8_U_INDEX] {
+                            // Apply only to KOI8-U.
+                            self.score += NON_LATIN_ALL_CAPS_PENALTY;
+                        }
                     }
                     NonLatinCaseState::Mix | NonLatinCaseState::LowerUpperUpper => {
                         // Per letter
