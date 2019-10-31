@@ -29,7 +29,8 @@ mod data;
 use data::*;
 
 const LATIN_ADJACENCY_PENALTY: i64 = -40;
-const IMPLAUSIBILITY_PENALTY: i64 = -200;
+
+const IMPLAUSIBILITY_PENALTY: i64 = -220;
 
 const IMPLAUSIBLE_LATIN_CASE_TRANSITION_PENALTY: i64 = -100;
 
@@ -1397,31 +1398,31 @@ impl Candidate {
                 return c.score;
             }
             InnerCandidate::NonLatinCased(c) => {
-                if c.longest_word >= 3 {
+                if c.longest_word >= 2 {
                     return c.score;
                 }
                 return i64::min_value();
             }
             InnerCandidate::Caseless(c) => {
-                if c.longest_word >= 3 {
+                if c.longest_word >= 2 {
                     return c.score;
                 }
                 return i64::min_value();
             }
             InnerCandidate::ArabicFrench(c) => {
-                if c.longest_word >= 3 {
+                if c.longest_word >= 2 {
                     return c.score;
                 }
                 return i64::min_value();
             }
             InnerCandidate::Logical(c) => {
-                if c.longest_word >= 3 {
+                if c.longest_word >= 2 {
                     return c.score;
                 }
                 return i64::min_value();
             }
             InnerCandidate::Visual(c) => {
-                if c.longest_word >= 3 {
+                if c.longest_word >= 2 {
                     return c.score;
                 }
                 return i64::min_value();
@@ -1769,11 +1770,6 @@ impl EncodingDetector {
             {
                 return (encoding, utf);
             }
-        }
-        if max < 0 {
-            // Single-byte result was garbage and the fallback wasn't
-            // the best fit.
-            encoding = self.fallback.unwrap_or(WINDOWS_1252);
         }
 
         if !self.candidates[Self::EUC_KR_INDEX].ascii_pair_ratio_ok() {
