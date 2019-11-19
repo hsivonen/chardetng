@@ -62,7 +62,9 @@ const EUC_JP_SCORE_PER_KANJI: i64 = CJK_BASE_SCORE;
 
 const EUC_JP_INITIAL_KANA_PENALTY: i64 = -((CJK_BASE_SCORE / 3) + 1);
 
-const BIG5_SCORE_PER_HANZI: i64 = CJK_BASE_SCORE;
+const BIG5_SCORE_PER_LEVEL_1_HANZI: i64 = CJK_BASE_SCORE;
+
+const BIG5_SCORE_PER_OTHER_HANZI: i64 = CJK_BASE_SCORE; // XXX
 
 const EUC_KR_SCORE_PER_EUC_HANGUL: i64 = CJK_BASE_SCORE + 1;
 
@@ -76,7 +78,7 @@ const EUC_KR_LONG_WORD_PENALTY: i64 = -6;
 
 const GBK_SCORE_PER_LEVEL_1: i64 = CJK_BASE_SCORE;
 
-const GBK_SCORE_PER_LEVEL_2: i64 = CJK_BASE_SCORE;
+const GBK_SCORE_PER_LEVEL_2: i64 = CJK_BASE_SCORE; // XXX
 
 const GBK_SCORE_PER_NON_EUC: i64 = CJK_BASE_SCORE / 4;
 
@@ -1036,21 +1038,21 @@ impl EucJpCandidate {
 struct Big5Candidate {
     decoder: Decoder,
     prev: LatinCj,
+    prev_byte: u8,
 }
 
 impl Big5Candidate {
     fn feed(&mut self, buffer: &[u8], last: bool) -> Option<i64> {
         let mut score = 0i64;
-        let mut dst = [0u16; 1024];
-        let mut total_read = 0;
-        loop {
-            let (result, read, written) = self.decoder.decode_to_utf16_without_replacement(
-                &buffer[total_read..],
-                &mut dst,
-                last,
-            );
-            total_read += read;
-            for &u in dst[..written].iter() {
+        let mut src = [0u8];
+        let mut dst = [0u16; 2];
+        for &b in buffer {
+            src[0] = b;
+            let (result, read, written) = self
+                .decoder
+                .decode_to_utf16_without_replacement(&src, &mut dst, false);
+            if written == 1 {
+                let u = dst[0];
                 if (u >= u16::from(b'a') && u <= u16::from(b'z'))
                     || (u >= u16::from(b'A') && u <= u16::from(b'Z'))
                 {
@@ -1058,16 +1060,20 @@ impl Big5Candidate {
                         score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
                     self.prev = LatinCj::AsciiLetter;
-                } else if (u >= 0x3400 && u < 0xA000)
-                    || (u >= 0xF900 && u < 0xFB00)
-                    || (u >= 0xD480 && u < 0xD880)
-                {
-                    score += BIG5_SCORE_PER_HANZI;
+                } else if (u >= 0x3400 && u < 0xA000) || (u >= 0xF900 && u < 0xFB00) {
+                    match self.prev_byte {
+                        0xA4..=0xC6 => {
+                            score += BIG5_SCORE_PER_LEVEL_1_HANZI;
+                        }
+                        _ => {
+                            score += BIG5_SCORE_PER_OTHER_HANZI;
+                        }
+                    }
                     if self.prev == LatinCj::AsciiLetter {
                         score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
                     self.prev = LatinCj::Cj;
-                } else if !(u >= 0xDC00 && u <= 0xDFFF) {
+                } else {
                     match u {
                         0x3000 // Distinct from Korean, space
                         | 0x3001 // Distinct from Korean, enumeration comma
@@ -1090,20 +1096,43 @@ impl Big5Candidate {
                         }
                     }
                     self.prev = LatinCj::Other;
-                } // else low surrogate
+                }
+            } else if written == 2 {
+                assert!(dst[0] >= 0xD480 && dst[0] < 0xD880);
+                score += BIG5_SCORE_PER_OTHER_HANZI;
+                if self.prev == LatinCj::AsciiLetter {
+                    score += CJK_LATIN_ADJACENCY_PENALTY;
+                }
+                self.prev = LatinCj::Cj;
             }
             match result {
                 DecoderResult::InputEmpty => {
-                    return Some(score);
+                    assert_eq!(read, 1);
                 }
                 DecoderResult::Malformed(_, _) => {
                     return None;
                 }
                 DecoderResult::OutputFull => {
-                    continue;
+                    unreachable!();
+                }
+            }
+            self.prev_byte = b;
+        }
+        if last {
+            let (result, _, _) = self
+                .decoder
+                .decode_to_utf16_without_replacement(b"", &mut dst, true);
+            match result {
+                DecoderResult::InputEmpty => {}
+                DecoderResult::Malformed(_, _) => {
+                    return None;
+                }
+                DecoderResult::OutputFull => {
+                    unreachable!();
                 }
             }
         }
+        Some(score)
     }
 }
 
@@ -1437,6 +1466,7 @@ impl Candidate {
             inner: InnerCandidate::Big5(Big5Candidate {
                 decoder: BIG5.new_decoder_without_bom_handling(),
                 prev: LatinCj::Other,
+                prev_byte: 0,
             }),
             score: Some(0),
         }
@@ -1446,8 +1476,8 @@ impl Candidate {
         Candidate {
             inner: InnerCandidate::Gbk(GbkCandidate {
                 decoder: GBK.new_decoder_without_bom_handling(),
-                prev_was_euc_range: false,
                 prev: LatinCj::Other,
+                prev_byte: 0,
             }),
             score: Some(0),
         }
