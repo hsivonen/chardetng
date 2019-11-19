@@ -1114,7 +1114,7 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 18] = [
     },
     SingleByteData {
         encoding: &WINDOWS_1254_INIT,
-        lower: &DETECTOR_DATA.latin_ascii,
+        lower: &DETECTOR_DATA.turkish_ascii,
         upper: &DETECTOR_DATA.windows_1254,
         probabilities: &DETECTOR_DATA.turkish,
         ascii: TURKISH_ASCII,
