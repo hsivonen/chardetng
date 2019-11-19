@@ -46,19 +46,43 @@ const NON_LATIN_CAMEL_PENALTY: i64 = -80;
 
 const NON_LATIN_IMPLAUSIBLE_CASE_TRANSITION_PENALTY: i64 = -100;
 
-const SHIFT_JIS_SCORE_PER_KANA_KANJI: i64 = 20;
+const CJK_BASE_SCORE: i64 = 75;
 
-const EUC_JP_SCORE_PER_KANA: i64 = 20;
+const SHIFT_JIS_SCORE_PER_KANA: i64 = CJK_BASE_SCORE;
 
-const EUC_JP_SCORE_PER_KANJI: i64 = 20;
+const SHIFT_JIS_SCORE_PER_KANJI: i64 = CJK_BASE_SCORE;
 
-const BIG5_SCORE_PER_HANZI: i64 = 20;
+const SHIFT_JIS_PUA_PENALTY: i64 = -(CJK_BASE_SCORE / 2); // Should this be larger?
 
-const EUC_KR_SCORE_PER_MODERN_HANGUL: i64 = 20;
+const EUC_JP_SCORE_PER_KANA: i64 = CJK_BASE_SCORE + (CJK_BASE_SCORE / 3); // Relative to Big5
 
-const GBK_SCORE_PER_EUC: i64 = 20;
+const EUC_JP_SCORE_PER_NEAR_OBSOLETE_KANA: i64 = CJK_BASE_SCORE - 1;
 
-const GBK_SCORE_PER_NON_EUC: i64 = 5;
+const EUC_JP_SCORE_PER_KANJI: i64 = CJK_BASE_SCORE;
+
+const EUC_JP_INITIAL_KANA_PENALTY: i64 = -((CJK_BASE_SCORE / 3) + 1);
+
+const BIG5_SCORE_PER_HANZI: i64 = CJK_BASE_SCORE;
+
+const EUC_KR_SCORE_PER_EUC_HANGUL: i64 = CJK_BASE_SCORE + 1;
+
+const EUC_KR_SCORE_PER_NON_EUC_HANGUL: i64 = CJK_BASE_SCORE / 5;
+
+const EUC_KR_SCORE_PER_HANJA: i64 = CJK_BASE_SCORE - 1;
+
+const EUC_KR_HANJA_AFTER_HANGUL_PENALTY: i64 = -(CJK_BASE_SCORE * 10);
+
+const GBK_SCORE_PER_EUC: i64 = CJK_BASE_SCORE;
+
+const GBK_SCORE_PER_NON_EUC: i64 = CJK_BASE_SCORE / 4;
+
+const GBK_PUA_PENALTY: i64 = -(CJK_BASE_SCORE / 2); // Should this be larger?
+
+const CJK_LATIN_ADJACENCY_PENALTY: i64 = -30; // smaller penalty than LATIN_ADJACENCY_PENALTY
+
+const CJ_PUNCTUATION: i64 = CJK_BASE_SCORE / 2;
+
+const CJK_OTHER: i64 = CJK_BASE_SCORE / 4;
 
 /// Latin letter caseless class
 const LATIN_LETTER: u8 = 2;
@@ -96,7 +120,6 @@ enum NonLatinCaseState {
 
 struct NonLatinCasedCandidate {
     data: &'static SingleByteData,
-    score: i64,
     prev: u8,
     case_state: NonLatinCaseState,
     prev_ascii: bool,
@@ -108,7 +131,6 @@ impl NonLatinCasedCandidate {
     fn new(data: &'static SingleByteData) -> Self {
         NonLatinCasedCandidate {
             data: data,
-            score: 0,
             prev: 0,
             case_state: NonLatinCaseState::Space,
             prev_ascii: true,
@@ -117,11 +139,12 @@ impl NonLatinCasedCandidate {
         }
     }
 
-    fn feed(&mut self, buffer: &[u8]) -> bool {
+    fn feed(&mut self, buffer: &[u8]) -> Option<i64> {
+        let mut score = 0i64;
         for &b in buffer {
             let class = self.data.classify(b);
             if class == 255 {
-                return true;
+                return None;
             }
             let caseless_class = class & 0x7F;
 
@@ -161,26 +184,26 @@ impl NonLatinCasedCandidate {
                     | NonLatinCaseState::UpperLowerCamel => {}
                     NonLatinCaseState::UpperLower => {
                         // Intentionally applied only once per word.
-                        self.score += NON_LATIN_CAPITALIZATION_BONUS;
+                        score += NON_LATIN_CAPITALIZATION_BONUS;
                     }
                     NonLatinCaseState::LowerUpper => {
                         // Once per word
-                        self.score = NON_LATIN_IMPLAUSIBLE_CASE_TRANSITION_PENALTY;
+                        score += NON_LATIN_IMPLAUSIBLE_CASE_TRANSITION_PENALTY;
                     }
                     NonLatinCaseState::LowerUpperLower => {
                         // Once per word
-                        self.score += NON_LATIN_CAMEL_PENALTY;
+                        score += NON_LATIN_CAMEL_PENALTY;
                     }
                     NonLatinCaseState::AllCaps => {
                         // Intentionally applied only once per word.
                         if self.data == &SINGLE_BYTE_DATA[KOI8_U_INDEX] {
                             // Apply only to KOI8-U.
-                            self.score += NON_LATIN_ALL_CAPS_PENALTY;
+                            score += NON_LATIN_ALL_CAPS_PENALTY;
                         }
                     }
                     NonLatinCaseState::Mix | NonLatinCaseState::LowerUpperUpper => {
                         // Per letter
-                        self.score += NON_LATIN_MIXED_CASE_PENALTY;
+                        score += NON_LATIN_MIXED_CASE_PENALTY;
                     }
                 }
                 self.case_state = NonLatinCaseState::Space;
@@ -197,23 +220,23 @@ impl NonLatinCasedCandidate {
                     | NonLatinCaseState::UpperLower
                     | NonLatinCaseState::UpperLowerCamel => {}
                     NonLatinCaseState::LowerUpper => {
-                        self.score += NON_LATIN_CAMEL_PENALTY;
+                        score += NON_LATIN_CAMEL_PENALTY;
                         self.case_state = NonLatinCaseState::LowerUpperLower;
                     }
                     NonLatinCaseState::LowerUpperUpper => {
-                        self.score += NON_LATIN_MIXED_CASE_PENALTY;
+                        score += NON_LATIN_MIXED_CASE_PENALTY;
                         self.case_state = NonLatinCaseState::Mix;
                     }
                     NonLatinCaseState::LowerUpperLower => {
-                        self.score += NON_LATIN_CAMEL_PENALTY;
+                        score += NON_LATIN_CAMEL_PENALTY;
                         self.case_state = NonLatinCaseState::UpperLowerCamel;
                     }
                     NonLatinCaseState::AllCaps => {
-                        self.score = NON_LATIN_IMPLAUSIBLE_CASE_TRANSITION_PENALTY;
+                        score += NON_LATIN_IMPLAUSIBLE_CASE_TRANSITION_PENALTY;
                         self.case_state = NonLatinCaseState::Mix;
                     }
                     NonLatinCaseState::Mix => {
-                        self.score += NON_LATIN_MIXED_CASE_PENALTY;
+                        score += NON_LATIN_MIXED_CASE_PENALTY;
                     }
                 }
             } else {
@@ -233,14 +256,14 @@ impl NonLatinCasedCandidate {
                     }
                     NonLatinCaseState::LowerUpper => {
                         // Once per word
-                        self.score = NON_LATIN_IMPLAUSIBLE_CASE_TRANSITION_PENALTY;
+                        score += NON_LATIN_IMPLAUSIBLE_CASE_TRANSITION_PENALTY;
                         self.case_state = NonLatinCaseState::LowerUpperUpper;
                     }
                     NonLatinCaseState::LowerUpperUpper | NonLatinCaseState::Mix => {
-                        self.score += NON_LATIN_MIXED_CASE_PENALTY;
+                        score += NON_LATIN_MIXED_CASE_PENALTY;
                     }
                     NonLatinCaseState::LowerUpperLower => {
-                        self.score = NON_LATIN_IMPLAUSIBLE_CASE_TRANSITION_PENALTY;
+                        score += NON_LATIN_IMPLAUSIBLE_CASE_TRANSITION_PENALTY;
                         self.case_state = NonLatinCaseState::Mix;
                     }
                     NonLatinCaseState::AllCaps => {}
@@ -257,27 +280,26 @@ impl NonLatinCasedCandidate {
             }
 
             if !ascii_pair {
-                self.score += self.data.score(caseless_class, self.prev);
+                score += self.data.score(caseless_class, self.prev);
 
                 if self.prev == LATIN_LETTER && non_ascii_alphabetic {
-                    self.score += LATIN_ADJACENCY_PENALTY;
+                    score += LATIN_ADJACENCY_PENALTY;
                 } else if caseless_class == LATIN_LETTER
                     && self.data.is_non_latin_alphabetic(self.prev)
                 {
-                    self.score += LATIN_ADJACENCY_PENALTY;
+                    score += LATIN_ADJACENCY_PENALTY;
                 }
             }
 
             self.prev_ascii = ascii;
             self.prev = caseless_class;
         }
-        false
+        Some(score)
     }
 }
 
 struct LatinCandidate {
     data: &'static SingleByteData,
-    score: i64,
     prev: u8,
     case_state: LatinCaseState,
     prev_non_ascii: u32,
@@ -287,18 +309,18 @@ impl LatinCandidate {
     fn new(data: &'static SingleByteData) -> Self {
         LatinCandidate {
             data: data,
-            score: 0,
             prev: 0,
             case_state: LatinCaseState::Space,
             prev_non_ascii: 0,
         }
     }
 
-    fn feed(&mut self, buffer: &[u8]) -> bool {
+    fn feed(&mut self, buffer: &[u8]) -> Option<i64> {
+        let mut score = 0i64;
         for &b in buffer {
             let class = self.data.classify(b);
             if class == 255 {
-                return true;
+                return None;
             }
             let caseless_class = class & 0x7F;
 
@@ -311,7 +333,7 @@ impl LatinCandidate {
                 4 => -20,
                 _ => -200,
             };
-            self.score += non_ascii_penalty;
+            score += non_ascii_penalty;
 
             if !self.data.is_latin_alphabetic(caseless_class) {
                 self.case_state = LatinCaseState::Space;
@@ -320,7 +342,7 @@ impl LatinCandidate {
                 // is important for avoiding misdetecting
                 // windows-1250 as windows-1252 (byte 0x9F).
                 if self.case_state == LatinCaseState::AllCaps && !ascii_pair {
-                    self.score += IMPLAUSIBLE_LATIN_CASE_TRANSITION_PENALTY;
+                    score += IMPLAUSIBLE_LATIN_CASE_TRANSITION_PENALTY;
                 }
                 self.case_state = LatinCaseState::Lower;
             } else {
@@ -334,7 +356,7 @@ impl LatinCandidate {
                     LatinCaseState::Lower => {
                         if !ascii_pair {
                             // XXX How bad is this for Irish Gaelic?
-                            self.score += IMPLAUSIBLE_LATIN_CASE_TRANSITION_PENALTY;
+                            score += IMPLAUSIBLE_LATIN_CASE_TRANSITION_PENALTY;
                         }
                         self.case_state = LatinCaseState::Upper;
                     }
@@ -342,7 +364,7 @@ impl LatinCandidate {
             }
 
             if !ascii_pair {
-                self.score += self.data.score(caseless_class, self.prev);
+                score += self.data.score(caseless_class, self.prev);
             }
 
             if ascii {
@@ -352,13 +374,12 @@ impl LatinCandidate {
             }
             self.prev = caseless_class;
         }
-        false
+        Some(score)
     }
 }
 
 struct ArabicFrenchCandidate {
     data: &'static SingleByteData,
-    score: i64,
     prev: u8,
     case_state: LatinCaseState,
     prev_ascii: bool,
@@ -370,7 +391,6 @@ impl ArabicFrenchCandidate {
     fn new(data: &'static SingleByteData) -> Self {
         ArabicFrenchCandidate {
             data: data,
-            score: 0,
             prev: 0,
             case_state: LatinCaseState::Space,
             prev_ascii: true,
@@ -379,11 +399,12 @@ impl ArabicFrenchCandidate {
         }
     }
 
-    fn feed(&mut self, buffer: &[u8]) -> bool {
+    fn feed(&mut self, buffer: &[u8]) -> Option<i64> {
+        let mut score = 0i64;
         for &b in buffer {
             let class = self.data.classify(b);
             if class == 255 {
-                return true;
+                return None;
             }
             let caseless_class = class & 0x7F;
 
@@ -395,7 +416,7 @@ impl ArabicFrenchCandidate {
                 self.case_state = LatinCaseState::Space;
             } else if (class >> 7) == 0 {
                 if self.case_state == LatinCaseState::AllCaps && !ascii_pair {
-                    self.score += IMPLAUSIBLE_LATIN_CASE_TRANSITION_PENALTY;
+                    score += IMPLAUSIBLE_LATIN_CASE_TRANSITION_PENALTY;
                 }
                 self.case_state = LatinCaseState::Lower;
             } else {
@@ -408,7 +429,7 @@ impl ArabicFrenchCandidate {
                     }
                     LatinCaseState::Lower => {
                         if !ascii_pair {
-                            self.score += IMPLAUSIBLE_LATIN_CASE_TRANSITION_PENALTY;
+                            score += IMPLAUSIBLE_LATIN_CASE_TRANSITION_PENALTY;
                         }
                         self.case_state = LatinCaseState::Upper;
                     }
@@ -427,27 +448,26 @@ impl ArabicFrenchCandidate {
             }
 
             if !ascii_pair {
-                self.score += self.data.score(caseless_class, self.prev);
+                score += self.data.score(caseless_class, self.prev);
 
                 if self.prev == LATIN_LETTER && non_ascii_alphabetic {
-                    self.score += LATIN_ADJACENCY_PENALTY;
+                    score += LATIN_ADJACENCY_PENALTY;
                 } else if caseless_class == LATIN_LETTER
                     && self.data.is_non_latin_alphabetic(self.prev)
                 {
-                    self.score += LATIN_ADJACENCY_PENALTY;
+                    score += LATIN_ADJACENCY_PENALTY;
                 }
             }
 
             self.prev_ascii = ascii;
             self.prev = caseless_class;
         }
-        false
+        Some(score)
     }
 }
 
 struct CaselessCandidate {
     data: &'static SingleByteData,
-    score: i64,
     prev: u8,
     prev_ascii: bool,
     current_word_len: u64,
@@ -458,7 +478,6 @@ impl CaselessCandidate {
     fn new(data: &'static SingleByteData) -> Self {
         CaselessCandidate {
             data: data,
-            score: 0,
             prev: 0,
             prev_ascii: true,
             current_word_len: 0,
@@ -466,11 +485,12 @@ impl CaselessCandidate {
         }
     }
 
-    fn feed(&mut self, buffer: &[u8]) -> bool {
+    fn feed(&mut self, buffer: &[u8]) -> Option<i64> {
+        let mut score = 0i64;
         for &b in buffer {
             let class = self.data.classify(b);
             if class == 255 {
-                return true;
+                return None;
             }
             let caseless_class = class & 0x7F;
 
@@ -488,27 +508,26 @@ impl CaselessCandidate {
             }
 
             if !ascii_pair {
-                self.score += self.data.score(caseless_class, self.prev);
+                score += self.data.score(caseless_class, self.prev);
 
                 if self.prev == LATIN_LETTER && non_ascii_alphabetic {
-                    self.score += LATIN_ADJACENCY_PENALTY;
+                    score += LATIN_ADJACENCY_PENALTY;
                 } else if caseless_class == LATIN_LETTER
                     && self.data.is_non_latin_alphabetic(self.prev)
                 {
-                    self.score += LATIN_ADJACENCY_PENALTY;
+                    score += LATIN_ADJACENCY_PENALTY;
                 }
             }
 
             self.prev_ascii = ascii;
             self.prev = caseless_class;
         }
-        false
+        Some(score)
     }
 }
 
 struct LogicalCandidate {
     data: &'static SingleByteData,
-    score: i64,
     prev: u8,
     prev_ascii: bool,
     plausible_punctuation: u64,
@@ -520,7 +539,6 @@ impl LogicalCandidate {
     fn new(data: &'static SingleByteData) -> Self {
         LogicalCandidate {
             data: data,
-            score: 0,
             prev: 0,
             prev_ascii: true,
             plausible_punctuation: 0,
@@ -529,11 +547,12 @@ impl LogicalCandidate {
         }
     }
 
-    fn feed(&mut self, buffer: &[u8]) -> bool {
+    fn feed(&mut self, buffer: &[u8]) -> Option<i64> {
+        let mut score = 0i64;
         for &b in buffer {
             let class = self.data.classify(b);
             if class == 255 {
-                return true;
+                return None;
             }
             let caseless_class = class & 0x7F;
 
@@ -551,7 +570,7 @@ impl LogicalCandidate {
             }
 
             if !ascii_pair {
-                self.score += self.data.score(caseless_class, self.prev);
+                score += self.data.score(caseless_class, self.prev);
 
                 let prev_non_ascii_alphabetic = self.data.is_non_latin_alphabetic(self.prev);
                 if caseless_class == ASCII_PUNCTUATION && prev_non_ascii_alphabetic {
@@ -559,22 +578,21 @@ impl LogicalCandidate {
                 }
 
                 if self.prev == LATIN_LETTER && non_ascii_alphabetic {
-                    self.score += LATIN_ADJACENCY_PENALTY;
+                    score += LATIN_ADJACENCY_PENALTY;
                 } else if caseless_class == LATIN_LETTER && prev_non_ascii_alphabetic {
-                    self.score += LATIN_ADJACENCY_PENALTY;
+                    score += LATIN_ADJACENCY_PENALTY;
                 }
             }
 
             self.prev_ascii = ascii;
             self.prev = caseless_class;
         }
-        false
+        Some(score)
     }
 }
 
 struct VisualCandidate {
     data: &'static SingleByteData,
-    score: i64,
     prev: u8,
     prev_ascii: bool,
     plausible_punctuation: u64,
@@ -586,7 +604,6 @@ impl VisualCandidate {
     fn new(data: &'static SingleByteData) -> Self {
         VisualCandidate {
             data: data,
-            score: 0,
             prev: 0,
             prev_ascii: true,
             plausible_punctuation: 0,
@@ -595,11 +612,12 @@ impl VisualCandidate {
         }
     }
 
-    fn feed(&mut self, buffer: &[u8]) -> bool {
+    fn feed(&mut self, buffer: &[u8]) -> Option<i64> {
+        let mut score = 0i64;
         for &b in buffer {
             let class = self.data.classify(b);
             if class == 255 {
-                return true;
+                return None;
             }
             let caseless_class = class & 0x7F;
 
@@ -617,25 +635,25 @@ impl VisualCandidate {
             }
 
             if !ascii_pair {
-                self.score += self.data.score(caseless_class, self.prev);
+                score += self.data.score(caseless_class, self.prev);
 
                 if non_ascii_alphabetic && self.prev == ASCII_PUNCTUATION {
                     self.plausible_punctuation += 1;
                 }
 
                 if self.prev == LATIN_LETTER && non_ascii_alphabetic {
-                    self.score += LATIN_ADJACENCY_PENALTY;
+                    score += LATIN_ADJACENCY_PENALTY;
                 } else if caseless_class == LATIN_LETTER
                     && self.data.is_non_latin_alphabetic(self.prev)
                 {
-                    self.score += LATIN_ADJACENCY_PENALTY;
+                    score += LATIN_ADJACENCY_PENALTY;
                 }
             }
 
             self.prev_ascii = ascii;
             self.prev = caseless_class;
         }
-        false
+        Some(score)
     }
 }
 
@@ -644,7 +662,7 @@ struct Utf8Candidate {
 }
 
 impl Utf8Candidate {
-    fn feed(&mut self, buffer: &[u8], last: bool) -> bool {
+    fn feed(&mut self, buffer: &[u8], last: bool) -> Option<i64> {
         let mut dst = [0u8; 1024];
         let mut total_read = 0;
         loop {
@@ -656,10 +674,10 @@ impl Utf8Candidate {
             total_read += read;
             match result {
                 DecoderResult::InputEmpty => {
-                    return false;
+                    return Some(0);
                 }
                 DecoderResult::Malformed(_, _) => {
-                    return true;
+                    return None;
                 }
                 DecoderResult::OutputFull => {
                     continue;
@@ -669,26 +687,30 @@ impl Utf8Candidate {
     }
 }
 
-enum AsciiCjk {
+#[derive(PartialEq)]
+enum LatinCj {
     AsciiLetter,
-    Cjk,
+    Cj,
+    Other,
+}
+
+#[derive(PartialEq)]
+enum LatinKorean {
+    AsciiLetter,
+    Hangul,
+    Hanja,
     Other,
 }
 
 struct GbkCandidate {
     decoder: Decoder,
-    euc_range: u64,
-    non_euc_range: u64,
     prev_was_euc_range: bool,
-    cjk_pairs: u64,
-    ascii_cjk_pairs: u64,
-    prev: AsciiCjk,
-    pua: u64,
-    score: i64,
+    prev: LatinCj,
 }
 
 impl GbkCandidate {
-    fn feed(&mut self, buffer: &[u8], last: bool) -> bool {
+    fn feed(&mut self, buffer: &[u8], last: bool) -> Option<i64> {
+        let mut score = 0i64;
         let mut src = [0u8];
         let mut dst = [0u16; 2];
         for &b in buffer {
@@ -702,47 +724,29 @@ impl GbkCandidate {
                 if (u >= u16::from(b'a') && u <= u16::from(b'z'))
                     || (u >= u16::from(b'A') && u <= u16::from(b'Z'))
                 {
-                    match self.prev {
-                        AsciiCjk::Cjk => {
-                            self.ascii_cjk_pairs += 1;
-                        }
-                        _ => {}
+                    if self.prev == LatinCj::Cj {
+                        score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
-                    self.prev = AsciiCjk::AsciiLetter;
+                    self.prev = LatinCj::AsciiLetter;
                 } else if u >= 0x4E00 && u <= 0x9FA5 {
                     if self.prev_was_euc_range && in_euc_range {
-                        self.euc_range += 1;
+                        score += GBK_SCORE_PER_EUC;
                     } else {
-                        self.non_euc_range += 1;
+                        score += GBK_SCORE_PER_NON_EUC;
                     }
-                    match self.prev {
-                        AsciiCjk::Cjk => {
-                            self.cjk_pairs += 1;
-                        }
-                        AsciiCjk::AsciiLetter => {
-                            self.ascii_cjk_pairs += 1;
-                        }
-                        AsciiCjk::Other => {}
+                    if self.prev == LatinCj::AsciiLetter {
+                        score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
-                    self.prev = AsciiCjk::Cjk;
+                    self.prev = LatinCj::Cj;
                 } else if (u >= 0x3400 && u < 0xA000) || (u >= 0xF900 && u < 0xFB00) {
-                    match self.prev {
-                        AsciiCjk::Cjk => {
-                            self.cjk_pairs += 1;
-                        }
-                        AsciiCjk::AsciiLetter => {
-                            self.ascii_cjk_pairs += 1;
-                        }
-                        AsciiCjk::Other => {}
+                    if self.prev == LatinCj::AsciiLetter {
+                        score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
-                    self.prev = AsciiCjk::Cjk;
+                    self.prev = LatinCj::Cj;
                 } else if u >= 0xE000 && u < 0xF900 {
-                    // Allow PUA characters in AR PL UMing CN on the
-                    // assumption that since they complete logical sequences
-                    // they might be supported by other fonts, too.
+                    // Treat the GB18030-required PUA mappings as non-EUC ideographs.
                     match u {
-                        0xE78D..=0xE793
-                        | 0xE794..=0xE796
+                        0xE78D..=0xE796
                         | 0xE816..=0xE818
                         | 0xE81E
                         | 0xE826
@@ -754,33 +758,52 @@ impl GbkCandidate {
                         | 0xE843
                         | 0xE854
                         | 0xE855
-                        | 0xE864 => {}
+                        | 0xE864 => {
+                            score += GBK_SCORE_PER_NON_EUC;
+                            if self.prev == LatinCj::AsciiLetter {
+                                score += CJK_LATIN_ADJACENCY_PENALTY;
+                            }
+                            self.prev = LatinCj::Cj;
+                        }
                         _ => {
-                            self.pua += 1;
+                            score += GBK_PUA_PENALTY;
+                            self.prev = LatinCj::Other;
                         }
                     }
-                    self.prev = AsciiCjk::Other;
                 } else {
-                    self.prev = AsciiCjk::Other;
+                    match u {
+                        0x3000 // Distinct from Korean, space
+                        | 0x3001 // Distinct from Korean, enumeration comma
+                        | 0x3002 // Distinct from Korean, full stop
+                        | 0xFF08 // Distinct from Korean, parenthesis
+                        | 0xFF09 // Distinct from Korean, parenthesis
+                        | 0xFF01 // Distinct from Japanese, exclamation
+                        | 0xFF0C // Distinct from Japanese, comma
+                        | 0xFF1B // Distinct from Japanese, semicolon
+                        | 0xFF1F // Distinct from Japanese, question
+                        => {
+                            score += CJ_PUNCTUATION;
+                        }
+                        _ => {
+                            score += CJK_OTHER;
+                        }
+                    }
+                    self.prev = LatinCj::Other;
                 }
             } else if written == 2 {
                 let u = dst[0];
                 if u >= 0xDB80 && u <= 0xDBFF {
-                    self.pua += 1;
-                    self.prev = AsciiCjk::Other;
+                    score += GBK_PUA_PENALTY;
+                    self.prev = LatinCj::Other;
                 } else if u >= 0xD480 && u < 0xD880 {
-                    match self.prev {
-                        AsciiCjk::Cjk => {
-                            self.cjk_pairs += 1;
-                        }
-                        AsciiCjk::AsciiLetter => {
-                            self.ascii_cjk_pairs += 1;
-                        }
-                        AsciiCjk::Other => {}
+                    score += GBK_SCORE_PER_NON_EUC;
+                    if self.prev == LatinCj::AsciiLetter {
+                        score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
-                    self.prev = AsciiCjk::Cjk;
-                } else if !(u >= 0xDC00 && u <= 0xDBFF) {
-                    self.prev = AsciiCjk::Other;
+                    self.prev = LatinCj::Cj;
+                } else {
+                    score += CJK_OTHER;
+                    self.prev = LatinCj::Other;
                 }
             }
             match result {
@@ -788,7 +811,7 @@ impl GbkCandidate {
                     assert_eq!(read, 1);
                 }
                 DecoderResult::Malformed(_, _) => {
-                    return true;
+                    return None;
                 }
                 DecoderResult::OutputFull => {
                     unreachable!();
@@ -803,30 +826,26 @@ impl GbkCandidate {
             match result {
                 DecoderResult::InputEmpty => {}
                 DecoderResult::Malformed(_, _) => {
-                    return true;
+                    return None;
                 }
                 DecoderResult::OutputFull => {
                     unreachable!();
                 }
             }
         }
-        return false;
+        Some(score)
     }
 }
 
 struct ShiftJisCandidate {
     decoder: Decoder,
     non_ascii_seen: bool,
-    cjk_pairs: u64,
-    ascii_cjk_pairs: u64,
-    prev: AsciiCjk,
-    pua: u64,
-    kana_kanji: u64,
-    score: i64,
+    prev: LatinCj,
 }
 
 impl ShiftJisCandidate {
-    fn feed(&mut self, buffer: &[u8], last: bool) -> bool {
+    fn feed(&mut self, buffer: &[u8], last: bool) -> Option<i64> {
+        let mut score = 0i64;
         let mut dst = [0u16; 1024];
         let mut total_read = 0;
         loop {
@@ -840,47 +859,57 @@ impl ShiftJisCandidate {
                 if !self.non_ascii_seen && u >= 0x80 {
                     self.non_ascii_seen = true;
                     if u >= 0xFF61 && u <= 0xFF9F {
-                        return true;
+                        return None;
                     }
                 }
                 if (u >= u16::from(b'a') && u <= u16::from(b'z'))
                     || (u >= u16::from(b'A') && u <= u16::from(b'Z'))
                 {
-                    match self.prev {
-                        AsciiCjk::Cjk => {
-                            self.ascii_cjk_pairs += 1;
-                        }
-                        _ => {}
+                    if self.prev == LatinCj::Cj {
+                        score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
-                    self.prev = AsciiCjk::AsciiLetter;
-                } else if (u >= 0x3400 && u < 0xA000)
-                    || (u >= 0xF900 && u < 0xFB00)
-                    || (u >= 0x3040 && u < 0x3100)
-                {
-                    self.kana_kanji += 1;
-                    match self.prev {
-                        AsciiCjk::Cjk => {
-                            self.cjk_pairs += 1;
-                        }
-                        AsciiCjk::AsciiLetter => {
-                            self.ascii_cjk_pairs += 1;
-                        }
-                        AsciiCjk::Other => {}
+                    self.prev = LatinCj::AsciiLetter;
+                } else if u >= 0x3040 && u < 0x3100 {
+                    score += SHIFT_JIS_SCORE_PER_KANA;
+                    if self.prev == LatinCj::AsciiLetter {
+                        score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
-                    self.prev = AsciiCjk::Cjk;
+                    self.prev = LatinCj::Cj;
+                } else if (u >= 0x3400 && u < 0xA000) || (u >= 0xF900 && u < 0xFB00) {
+                    score += SHIFT_JIS_SCORE_PER_KANJI;
+                    if self.prev == LatinCj::AsciiLetter {
+                        score += CJK_LATIN_ADJACENCY_PENALTY;
+                    }
+                    self.prev = LatinCj::Cj;
                 } else if u >= 0xE000 && u < 0xF900 {
-                    self.pua += 1;
-                    self.prev = AsciiCjk::Other;
+                    score += SHIFT_JIS_PUA_PENALTY;
+                    self.prev = LatinCj::Other;
                 } else {
-                    self.prev = AsciiCjk::Other;
+                    match u {
+                        0x3000 // Distinct from Korean, space
+                        | 0x3001 // Distinct from Korean, enumeration comma
+                        | 0x3002 // Distinct from Korean, full stop
+                        | 0xFF08 // Distinct from Korean, parenthesis
+                        | 0xFF09 // Distinct from Korean, parenthesis
+                        => {
+                            // Not really needed for CJK distinction
+                            // but let's give non-zero score for these
+                            // common byte pairs anyway.
+                            score += CJ_PUNCTUATION;
+                        }
+                        _ => {
+                            score += CJK_OTHER;
+                        }
+                    }
+                    self.prev = LatinCj::Other;
                 }
             }
             match result {
                 DecoderResult::InputEmpty => {
-                    return false;
+                    return Some(score);
                 }
                 DecoderResult::Malformed(_, _) => {
-                    return true;
+                    return None;
                 }
                 DecoderResult::OutputFull => {
                     continue;
@@ -892,17 +921,13 @@ impl ShiftJisCandidate {
 
 struct EucJpCandidate {
     decoder: Decoder,
-    kana: u64,
-    kanji: u64,
     non_ascii_seen: bool,
-    cjk_pairs: u64,
-    ascii_cjk_pairs: u64,
-    prev: AsciiCjk,
-    score: i64,
+    prev: LatinCj,
 }
 
 impl EucJpCandidate {
-    fn feed(&mut self, buffer: &[u8], last: bool) -> bool {
+    fn feed(&mut self, buffer: &[u8], last: bool) -> Option<i64> {
+        let mut score = 0i64;
         let mut dst = [0u16; 1024];
         let mut total_read = 0;
         loop {
@@ -916,83 +941,68 @@ impl EucJpCandidate {
                 if !self.non_ascii_seen && u >= 0x80 {
                     self.non_ascii_seen = true;
                     if u >= 0xFF61 && u <= 0xFF9F {
-                        return true;
+                        return None;
+                    }
+                    if u >= 0x3040 && u < 0x3100 {
+                        // Remove the kana advantage over initial Big5
+                        // hanzi.
+                        score += EUC_JP_INITIAL_KANA_PENALTY;
                     }
                 }
                 if (u >= u16::from(b'a') && u <= u16::from(b'z'))
                     || (u >= u16::from(b'A') && u <= u16::from(b'Z'))
                 {
-                    match self.prev {
-                        AsciiCjk::Cjk => {
-                            self.ascii_cjk_pairs += 1;
-                        }
-                        _ => {}
+                    if self.prev == LatinCj::Cj {
+                        score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
-                    self.prev = AsciiCjk::AsciiLetter;
-                } else if u >= 0x3040 && u < 0x3100 {
-                    self.kana += 1;
-                    match self.prev {
-                        AsciiCjk::Cjk => {
-                            self.cjk_pairs += 1;
+                    self.prev = LatinCj::AsciiLetter;
+                } else if (u >= 0x3041 && u <= 0x3093) || (u >= 0x30A1 && u <= 0x30F6) {
+                    match u {
+                        0x3090 // hiragana wi
+                        | 0x3091 // hiragana we
+                        | 0x30F0 // katakana wi
+                        | 0x30F1 // katakana we
+                        => {
+                            // Remove advantage over Big5 Hanzi
+                            score += EUC_JP_SCORE_PER_NEAR_OBSOLETE_KANA;
                         }
-                        AsciiCjk::AsciiLetter => {
-                            self.ascii_cjk_pairs += 1;
+                        _ => {
+                            score += EUC_JP_SCORE_PER_KANA;
                         }
-                        AsciiCjk::Other => {}
                     }
-                    self.prev = AsciiCjk::Cjk;
+                    if self.prev == LatinCj::AsciiLetter {
+                        score += CJK_LATIN_ADJACENCY_PENALTY;
+                    }
+                    self.prev = LatinCj::Cj;
                 } else if (u >= 0x3400 && u < 0xA000) || (u >= 0xF900 && u < 0xFB00) {
-                    self.kanji += 1;
-                    match self.prev {
-                        AsciiCjk::Cjk => {
-                            self.cjk_pairs += 1;
-                        }
-                        AsciiCjk::AsciiLetter => {
-                            self.ascii_cjk_pairs += 1;
-                        }
-                        AsciiCjk::Other => {}
+                    score += EUC_JP_SCORE_PER_KANJI;
+                    if self.prev == LatinCj::AsciiLetter {
+                        score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
-                    self.prev = AsciiCjk::Cjk;
+                    self.prev = LatinCj::Cj;
                 } else {
-                    self.prev = AsciiCjk::Other;
+                    match u {
+                        0x3000 // Distinct from Korean, space
+                        | 0x3001 // Distinct from Korean, enumeration comma
+                        | 0x3002 // Distinct from Korean, full stop
+                        | 0xFF08 // Distinct from Korean, parenthesis
+                        | 0xFF09 // Distinct from Korean, parenthesis
+                        => {
+                            score += CJ_PUNCTUATION;
+                        }
+                        _ => {
+                            score += CJK_OTHER;
+                        }
+                    }
+                    self.prev = LatinCj::Other;
                 }
             }
             match result {
                 DecoderResult::InputEmpty => {
-                    return false;
+                    return Some(score);
                 }
                 DecoderResult::Malformed(_, _) => {
-                    return true;
-                }
-                DecoderResult::OutputFull => {
-                    continue;
-                }
-            }
-        }
-    }
-}
-
-struct Iso2022Candidate {
-    decoder: Decoder,
-}
-
-impl Iso2022Candidate {
-    fn feed(&mut self, buffer: &[u8], last: bool) -> bool {
-        let mut dst = [0u16; 1024];
-        let mut total_read = 0;
-        loop {
-            let (result, read, _) = self.decoder.decode_to_utf16_without_replacement(
-                &buffer[total_read..],
-                &mut dst,
-                last,
-            );
-            total_read += read;
-            match result {
-                DecoderResult::InputEmpty => {
-                    return false;
-                }
-                DecoderResult::Malformed(_, _) => {
-                    return true;
+                    return None;
                 }
                 DecoderResult::OutputFull => {
                     continue;
@@ -1004,15 +1014,12 @@ impl Iso2022Candidate {
 
 struct Big5Candidate {
     decoder: Decoder,
-    cjk_pairs: u64,
-    ascii_cjk_pairs: u64,
-    hanzi: u64,
-    prev: AsciiCjk,
-    score: i64,
+    prev: LatinCj,
 }
 
 impl Big5Candidate {
-    fn feed(&mut self, buffer: &[u8], last: bool) -> bool {
+    fn feed(&mut self, buffer: &[u8], last: bool) -> Option<i64> {
+        let mut score = 0i64;
         let mut dst = [0u16; 1024];
         let mut total_read = 0;
         loop {
@@ -1026,38 +1033,49 @@ impl Big5Candidate {
                 if (u >= u16::from(b'a') && u <= u16::from(b'z'))
                     || (u >= u16::from(b'A') && u <= u16::from(b'Z'))
                 {
-                    match self.prev {
-                        AsciiCjk::Cjk => {
-                            self.ascii_cjk_pairs += 1;
-                        }
-                        _ => {}
+                    if self.prev == LatinCj::Cj {
+                        score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
-                    self.prev = AsciiCjk::AsciiLetter;
+                    self.prev = LatinCj::AsciiLetter;
                 } else if (u >= 0x3400 && u < 0xA000)
                     || (u >= 0xF900 && u < 0xFB00)
                     || (u >= 0xD480 && u < 0xD880)
                 {
-                    self.hanzi += 1;
-                    match self.prev {
-                        AsciiCjk::Cjk => {
-                            self.cjk_pairs += 1;
-                        }
-                        AsciiCjk::AsciiLetter => {
-                            self.ascii_cjk_pairs += 1;
-                        }
-                        AsciiCjk::Other => {}
+                    score += BIG5_SCORE_PER_HANZI;
+                    if self.prev == LatinCj::AsciiLetter {
+                        score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
-                    self.prev = AsciiCjk::Cjk;
-                } else if !(u >= 0xDC00 && u <= 0xDBFF) {
-                    self.prev = AsciiCjk::Other;
-                }
+                    self.prev = LatinCj::Cj;
+                } else if !(u >= 0xDC00 && u <= 0xDFFF) {
+                    match u {
+                        0x3000 // Distinct from Korean, space
+                        | 0x3001 // Distinct from Korean, enumeration comma
+                        | 0x3002 // Distinct from Korean, full stop
+                        | 0xFF08 // Distinct from Korean, parenthesis
+                        | 0xFF09 // Distinct from Korean, parenthesis
+                        | 0xFF01 // Distinct from Japanese, exclamation
+                        | 0xFF0C // Distinct from Japanese, comma
+                        | 0xFF1B // Distinct from Japanese, semicolon
+                        | 0xFF1F // Distinct from Japanese, question
+                        => {
+                            // Not really needed for CJK distinction
+                            // but let's give non-zero score for these
+                            // common byte pairs anyway.
+                            score += CJ_PUNCTUATION;
+                        }
+                        _ => {
+                            score += CJK_OTHER;
+                        }
+                    }
+                    self.prev = LatinCj::Other;
+                } // else low surrogate
             }
             match result {
                 DecoderResult::InputEmpty => {
-                    return false;
+                    return Some(score);
                 }
                 DecoderResult::Malformed(_, _) => {
-                    return true;
+                    return None;
                 }
                 DecoderResult::OutputFull => {
                     continue;
@@ -1069,18 +1087,13 @@ impl Big5Candidate {
 
 struct EucKrCandidate {
     decoder: Decoder,
-    modern_hangul: u64,
-    other_hangul: u64,
-    hanja: u64,
     prev_was_euc_range: bool,
-    cjk_pairs: u64,
-    ascii_cjk_pairs: u64,
-    prev: AsciiCjk,
-    score: i64,
+    prev: LatinKorean,
 }
 
 impl EucKrCandidate {
-    fn feed(&mut self, buffer: &[u8], last: bool) -> bool {
+    fn feed(&mut self, buffer: &[u8], last: bool) -> Option<i64> {
+        let mut score = 0i64;
         let mut src = [0u8];
         let mut dst = [0u16; 2];
         for &b in buffer {
@@ -1095,42 +1108,38 @@ impl EucKrCandidate {
                     || (u >= u16::from(b'A') && u <= u16::from(b'Z'))
                 {
                     match self.prev {
-                        AsciiCjk::Cjk => {
-                            self.ascii_cjk_pairs += 1;
+                        LatinKorean::Hangul | LatinKorean::Hanja => {
+                            score += CJK_LATIN_ADJACENCY_PENALTY;
                         }
                         _ => {}
                     }
-                    self.prev = AsciiCjk::AsciiLetter;
+                    self.prev = LatinKorean::AsciiLetter;
                 } else if u >= 0xAC00 && u <= 0xD7A3 {
                     if self.prev_was_euc_range && in_euc_range {
-                        self.modern_hangul += 1;
+                        score += EUC_KR_SCORE_PER_EUC_HANGUL;
                     } else {
-                        self.other_hangul += 1;
+                        score += EUC_KR_SCORE_PER_NON_EUC_HANGUL;
                     }
-                    match self.prev {
-                        AsciiCjk::Cjk => {
-                            self.cjk_pairs += 1;
-                        }
-                        AsciiCjk::AsciiLetter => {
-                            self.ascii_cjk_pairs += 1;
-                        }
-                        AsciiCjk::Other => {}
+                    if self.prev == LatinKorean::AsciiLetter {
+                        score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
-                    self.prev = AsciiCjk::Cjk;
+                    self.prev = LatinKorean::Hangul;
+                // XXX Count word length and apply mild penalty if length > 5
                 } else if (u >= 0x4E00 && u < 0xAC00) || (u >= 0xF900 && u <= 0xFA0B) {
-                    self.hanja += 1;
+                    score += EUC_KR_SCORE_PER_HANJA;
                     match self.prev {
-                        AsciiCjk::Cjk => {
-                            self.cjk_pairs += 1;
+                        LatinKorean::AsciiLetter => {
+                            score += CJK_LATIN_ADJACENCY_PENALTY;
                         }
-                        AsciiCjk::AsciiLetter => {
-                            self.ascii_cjk_pairs += 1;
+                        LatinKorean::Hangul => {
+                            score += EUC_KR_HANJA_AFTER_HANGUL_PENALTY;
                         }
-                        AsciiCjk::Other => {}
+                        _ => {}
                     }
-                    self.prev = AsciiCjk::Cjk;
+                    self.prev = LatinKorean::Hanja;
                 } else {
-                    self.prev = AsciiCjk::Other;
+                    score += CJK_OTHER;
+                    self.prev = LatinKorean::Other;
                 }
             }
             match result {
@@ -1138,7 +1147,7 @@ impl EucKrCandidate {
                     assert_eq!(read, 1);
                 }
                 DecoderResult::Malformed(_, _) => {
-                    return true;
+                    return None;
                 }
                 DecoderResult::OutputFull => {
                     unreachable!();
@@ -1153,14 +1162,14 @@ impl EucKrCandidate {
             match result {
                 DecoderResult::InputEmpty => {}
                 DecoderResult::Malformed(_, _) => {
-                    return true;
+                    return None;
                 }
                 DecoderResult::OutputFull => {
                     unreachable!();
                 }
             }
         }
-        return false;
+        Some(score)
     }
 }
 
@@ -1172,7 +1181,6 @@ enum InnerCandidate {
     Logical(LogicalCandidate),
     Visual(VisualCandidate),
     Utf8(Utf8Candidate),
-    Iso2022(Iso2022Candidate),
     Shift(ShiftJisCandidate),
     EucJp(EucJpCandidate),
     EucKr(EucKrCandidate),
@@ -1181,160 +1189,169 @@ enum InnerCandidate {
 }
 
 impl InnerCandidate {
-    fn feed(&mut self, buffer: &[u8], last: bool) -> bool {
+    fn feed(&mut self, buffer: &[u8], last: bool) -> Option<i64> {
         match self {
             InnerCandidate::Latin(c) => {
-                let disqualified = c.feed(buffer);
-                if disqualified {
-                    return true;
+                if let Some(new_score) = c.feed(buffer) {
+                    if last {
+                        // Treat EOF as space-like
+                        if let Some(additional_score) = c.feed(b" ") {
+                            Some(new_score + additional_score)
+                        } else {
+                            None
+                        }
+                    } else {
+                        Some(new_score)
+                    }
+                } else {
+                    None
                 }
-                if last {
-                    // Treat EOF as space-like
-                    return c.feed(b" ");
-                }
-                return false;
             }
             InnerCandidate::NonLatinCased(c) => {
-                let disqualified = c.feed(buffer);
-                if disqualified {
-                    return true;
+                if let Some(new_score) = c.feed(buffer) {
+                    if last {
+                        // Treat EOF as space-like
+                        if let Some(additional_score) = c.feed(b" ") {
+                            Some(new_score + additional_score)
+                        } else {
+                            None
+                        }
+                    } else {
+                        Some(new_score)
+                    }
+                } else {
+                    None
                 }
-                if last {
-                    // Treat EOF as space-like
-                    return c.feed(b" ");
-                }
-                return false;
             }
             InnerCandidate::Caseless(c) => {
-                let disqualified = c.feed(buffer);
-                if disqualified {
-                    return true;
+                if let Some(new_score) = c.feed(buffer) {
+                    if last {
+                        // Treat EOF as space-like
+                        if let Some(additional_score) = c.feed(b" ") {
+                            Some(new_score + additional_score)
+                        } else {
+                            None
+                        }
+                    } else {
+                        Some(new_score)
+                    }
+                } else {
+                    None
                 }
-                if last {
-                    // Treat EOF as space-like
-                    return c.feed(b" ");
-                }
-                return false;
             }
             InnerCandidate::ArabicFrench(c) => {
-                let disqualified = c.feed(buffer);
-                if disqualified {
-                    return true;
+                if let Some(new_score) = c.feed(buffer) {
+                    if last {
+                        // Treat EOF as space-like
+                        if let Some(additional_score) = c.feed(b" ") {
+                            Some(new_score + additional_score)
+                        } else {
+                            None
+                        }
+                    } else {
+                        Some(new_score)
+                    }
+                } else {
+                    None
                 }
-                if last {
-                    // Treat EOF as space-like
-                    return c.feed(b" ");
-                }
-                return false;
             }
             InnerCandidate::Logical(c) => {
-                let disqualified = c.feed(buffer);
-                if disqualified {
-                    return true;
+                if let Some(new_score) = c.feed(buffer) {
+                    if last {
+                        // Treat EOF as space-like
+                        if let Some(additional_score) = c.feed(b" ") {
+                            Some(new_score + additional_score)
+                        } else {
+                            None
+                        }
+                    } else {
+                        Some(new_score)
+                    }
+                } else {
+                    None
                 }
-                if last {
-                    // Treat EOF as space-like
-                    return c.feed(b" ");
-                }
-                return false;
             }
             InnerCandidate::Visual(c) => {
-                let disqualified = c.feed(buffer);
-                if disqualified {
-                    return true;
+                if let Some(new_score) = c.feed(buffer) {
+                    if last {
+                        // Treat EOF as space-like
+                        if let Some(additional_score) = c.feed(b" ") {
+                            Some(new_score + additional_score)
+                        } else {
+                            None
+                        }
+                    } else {
+                        Some(new_score)
+                    }
+                } else {
+                    None
                 }
-                if last {
-                    // Treat EOF as space-like
-                    return c.feed(b" ");
-                }
-                return false;
             }
-            InnerCandidate::Utf8(c) => {
-                return c.feed(buffer, last);
-            }
-            InnerCandidate::Iso2022(c) => {
-                return c.feed(buffer, last);
-            }
-            InnerCandidate::Shift(c) => {
-                return c.feed(buffer, last);
-            }
-            InnerCandidate::EucJp(c) => {
-                return c.feed(buffer, last);
-            }
-            InnerCandidate::EucKr(c) => {
-                return c.feed(buffer, last);
-            }
-            InnerCandidate::Big5(c) => {
-                return c.feed(buffer, last);
-            }
-            InnerCandidate::Gbk(c) => {
-                return c.feed(buffer, last);
-            }
+            InnerCandidate::Utf8(c) => c.feed(buffer, last),
+            InnerCandidate::Shift(c) => c.feed(buffer, last),
+            InnerCandidate::EucJp(c) => c.feed(buffer, last),
+            InnerCandidate::EucKr(c) => c.feed(buffer, last),
+            InnerCandidate::Big5(c) => c.feed(buffer, last),
+            InnerCandidate::Gbk(c) => c.feed(buffer, last),
         }
     }
 }
 
 struct Candidate {
     inner: InnerCandidate,
-    disqualified: bool,
+    score: Option<i64>,
 }
 
 impl Candidate {
     fn feed(&mut self, buffer: &[u8], last: bool) {
-        if self.disqualified {
-            return;
+        if let Some(old_score) = self.score {
+            if let Some(new_score) = self.inner.feed(buffer, last) {
+                self.score = Some(old_score + new_score);
+            } else {
+                self.score = None;
+            }
         }
-        self.disqualified |= self.inner.feed(buffer, last);
     }
 
     fn new_latin(data: &'static SingleByteData) -> Self {
         Candidate {
             inner: InnerCandidate::Latin(LatinCandidate::new(data)),
-            disqualified: false,
+            score: Some(0),
         }
     }
 
     fn new_non_latin_cased(data: &'static SingleByteData) -> Self {
         Candidate {
             inner: InnerCandidate::NonLatinCased(NonLatinCasedCandidate::new(data)),
-            disqualified: false,
+            score: Some(0),
         }
     }
 
     fn new_caseless(data: &'static SingleByteData) -> Self {
         Candidate {
             inner: InnerCandidate::Caseless(CaselessCandidate::new(data)),
-            disqualified: false,
+            score: Some(0),
         }
     }
 
     fn new_arabic_french(data: &'static SingleByteData) -> Self {
         Candidate {
             inner: InnerCandidate::ArabicFrench(ArabicFrenchCandidate::new(data)),
-            disqualified: false,
+            score: Some(0),
         }
     }
 
     fn new_logical(data: &'static SingleByteData) -> Self {
         Candidate {
             inner: InnerCandidate::Logical(LogicalCandidate::new(data)),
-            disqualified: false,
+            score: Some(0),
         }
     }
 
     fn new_visual(data: &'static SingleByteData) -> Self {
         Candidate {
             inner: InnerCandidate::Visual(VisualCandidate::new(data)),
-            disqualified: false,
-        }
-    }
-
-    fn new_iso_2022_jp() -> Self {
-        Candidate {
-            inner: InnerCandidate::Iso2022(Iso2022Candidate {
-                decoder: ISO_2022_JP.new_decoder_without_bom_handling(),
-            }),
-            disqualified: false,
+            score: Some(0),
         }
     }
 
@@ -1343,7 +1360,7 @@ impl Candidate {
             inner: InnerCandidate::Utf8(Utf8Candidate {
                 decoder: UTF_8.new_decoder_without_bom_handling(),
             }),
-            disqualified: false,
+            score: Some(0),
         }
     }
 
@@ -1352,13 +1369,9 @@ impl Candidate {
             inner: InnerCandidate::Shift(ShiftJisCandidate {
                 decoder: SHIFT_JIS.new_decoder_without_bom_handling(),
                 non_ascii_seen: false,
-                cjk_pairs: 0,
-                ascii_cjk_pairs: 0,
-                prev: AsciiCjk::Other,
-                pua: 0,
-                kana_kanji: 0,
+                prev: LatinCj::Other,
             }),
-            disqualified: false,
+            score: Some(0),
         }
     }
 
@@ -1367,13 +1380,9 @@ impl Candidate {
             inner: InnerCandidate::EucJp(EucJpCandidate {
                 decoder: EUC_JP.new_decoder_without_bom_handling(),
                 non_ascii_seen: false,
-                kana: 0,
-                kanji: 0,
-                cjk_pairs: 0,
-                ascii_cjk_pairs: 0,
-                prev: AsciiCjk::Other,
+                prev: LatinCj::Other,
             }),
-            disqualified: false,
+            score: Some(0),
         }
     }
 
@@ -1381,15 +1390,10 @@ impl Candidate {
         Candidate {
             inner: InnerCandidate::EucKr(EucKrCandidate {
                 decoder: EUC_KR.new_decoder_without_bom_handling(),
-                modern_hangul: 0,
-                other_hangul: 0,
-                hanja: 0,
                 prev_was_euc_range: false,
-                cjk_pairs: 0,
-                ascii_cjk_pairs: 0,
-                prev: AsciiCjk::Other,
+                prev: LatinKorean::Other,
             }),
-            disqualified: false,
+            score: Some(0),
         }
     }
 
@@ -1397,12 +1401,9 @@ impl Candidate {
         Candidate {
             inner: InnerCandidate::Big5(Big5Candidate {
                 decoder: BIG5.new_decoder_without_bom_handling(),
-                cjk_pairs: 0,
-                ascii_cjk_pairs: 0,
-                hanzi: 0,
-                prev: AsciiCjk::Other,
+                prev: LatinCj::Other,
             }),
-            disqualified: false,
+            score: Some(0),
         }
     }
 
@@ -1410,72 +1411,43 @@ impl Candidate {
         Candidate {
             inner: InnerCandidate::Gbk(GbkCandidate {
                 decoder: GBK.new_decoder_without_bom_handling(),
-                euc_range: 0,
-                non_euc_range: 0,
                 prev_was_euc_range: false,
-                cjk_pairs: 0,
-                ascii_cjk_pairs: 0,
-                prev: AsciiCjk::Other,
-                pua: 0,
+                prev: LatinCj::Other,
             }),
-            disqualified: false,
+            score: Some(0),
         }
     }
 
-    fn score(&self) -> i64 {
+    fn score(&self) -> Option<i64> {
         match &self.inner {
-            InnerCandidate::Latin(c) => {
-                return c.score;
-            }
             InnerCandidate::NonLatinCased(c) => {
-                if c.longest_word >= 2 {
-                    return c.score;
+                if c.longest_word < 2 {
+                    return None;
                 }
-                return i64::min_value();
             }
             InnerCandidate::Caseless(c) => {
-                if c.longest_word >= 2 {
-                    return c.score;
+                if c.longest_word < 2 {
+                    return None;
                 }
-                return i64::min_value();
             }
             InnerCandidate::ArabicFrench(c) => {
-                if c.longest_word >= 2 {
-                    return c.score;
+                if c.longest_word < 2 {
+                    return None;
                 }
-                return i64::min_value();
             }
             InnerCandidate::Logical(c) => {
-                if c.longest_word >= 2 {
-                    return c.score;
+                if c.longest_word < 2 {
+                    return None;
                 }
-                return i64::min_value();
             }
             InnerCandidate::Visual(c) => {
-                if c.longest_word >= 2 {
-                    return c.score;
+                if c.longest_word < 2 {
+                    return None;
                 }
-                return i64::min_value();
             }
-            InnerCandidate::Shift(c) => {
-                return c.score;
-            }
-            InnerCandidate::EucJp(c) => {
-                return c.score;
-            }
-            InnerCandidate::Big5(c) => {
-                return c.score;
-            }
-            InnerCandidate::EucKr(c) => {
-                return c.score;
-            }
-            InnerCandidate::Gbk(c) => {
-                return c.score;
-            }
-            _ => {
-                unreachable!();
-            }
+            _ => {}
         }
+        self.score
     }
 
     fn plausible_punctuation(&self) -> u64 {
@@ -1527,97 +1499,8 @@ impl Candidate {
             InnerCandidate::Gbk(_) => {
                 return GBK;
             }
-            _ => {
-                unreachable!();
-            }
-        }
-    }
-
-    fn add_to_score(&mut self, delta: i64) {
-        match &mut self.inner {
-            InnerCandidate::Latin(c) => {
-                c.score += delta;
-            }
-            InnerCandidate::NonLatinCased(c) => {
-                c.score += delta;
-            }
-            InnerCandidate::Caseless(c) => {
-                c.score += delta;
-            }
-            InnerCandidate::ArabicFrench(c) => {
-                c.score += delta;
-            }
-            InnerCandidate::Logical(c) => {
-                c.score += delta;
-            }
-            InnerCandidate::Visual(c) => {
-                c.score += delta;
-            }
-            _ => {
-                unreachable!();
-            }
-        }
-    }
-
-    fn euc_jp_kana(&self) -> u64 {
-        match &self.inner {
-            InnerCandidate::EucJp(c) => {
-                return c.kana;
-            }
-            _ => {
-                unreachable!();
-            }
-        }
-    }
-
-    fn euc_kr_stats(&self) -> (u64, u64, u64) {
-        match &self.inner {
-            InnerCandidate::EucKr(c) => {
-                return (c.modern_hangul, c.other_hangul, c.hanja);
-            }
-            _ => {
-                unreachable!();
-            }
-        }
-    }
-
-    fn ascii_pair_ratio_ok(&self) -> bool {
-        // TODO: Adjust the minimum required pair threshold on a per-encoding basis
-        // The ratio is for avoiding misdetecting Latin as CJK.
-        // The threshold is for avoiding misdetecting non-Latin single-byte
-        // as CJK.
-        let (cjk_pairs, ascii_cjk_pairs) = match &self.inner {
-            InnerCandidate::Shift(c) => (c.cjk_pairs, c.ascii_cjk_pairs),
-            InnerCandidate::EucJp(c) => (c.cjk_pairs, c.ascii_cjk_pairs),
-            InnerCandidate::EucKr(c) => (c.cjk_pairs, c.ascii_cjk_pairs),
-            InnerCandidate::Big5(c) => (c.cjk_pairs, c.ascii_cjk_pairs),
-            InnerCandidate::Gbk(c) => (c.cjk_pairs, c.ascii_cjk_pairs),
-            _ => {
-                unreachable!();
-            }
-        };
-        ascii_cjk_pairs <= cjk_pairs / 128 // Arbitrary allowance
-    }
-
-    fn pua_ratio_ok(&self) -> bool {
-        let (cjk_pairs, pua) = match &self.inner {
-            InnerCandidate::Shift(c) => (c.cjk_pairs, c.pua),
-            InnerCandidate::Gbk(c) => (c.cjk_pairs, c.pua),
-            _ => {
-                unreachable!();
-            }
-        };
-        pua <= cjk_pairs / 256 // Arbitrary allowance
-    }
-
-    fn gbk_euc_ratio_ok(&self) -> bool {
-        match &self.inner {
-            InnerCandidate::Gbk(c) => {
-                // Arbitrary allowance
-                c.non_euc_range <= c.euc_range / 256
-            }
-            _ => {
-                unreachable!();
+            InnerCandidate::Utf8(_) => {
+                return UTF_8;
             }
         }
     }
@@ -1634,7 +1517,7 @@ fn count_non_ascii(buffer: &[u8]) -> u64 {
 }
 
 pub struct EncodingDetector {
-    candidates: [Candidate; 25],
+    candidates: [Candidate; 24],
     non_ascii_seen: u64,
     fallback: Option<&'static Encoding>,
     last_before_non_ascii: Option<u8>,
@@ -1678,172 +1561,35 @@ impl EncodingDetector {
     }
 
     fn guess(&self) -> (&'static Encoding, bool) {
-        if self.non_ascii_seen == 0
-            && self.esc_seen
-            && !self.candidates[Self::ISO_2022_JP_INDEX].disqualified
+        if self.non_ascii_seen == 0 && self.esc_seen
+        // XXX scan for the rest of escape
         {
             return (ISO_2022_JP, false);
         }
 
-        let utf = !self.candidates[Self::UTF_8_INDEX].disqualified && self.non_ascii_seen > 0;
-
-        let mut euc_kr_ok = !self.candidates[Self::EUC_KR_INDEX].disqualified;
-        let mut big5_ok = !self.candidates[Self::BIG5_INDEX].disqualified;
-        let mut gbk_ok = !self.candidates[Self::GBK_INDEX].disqualified;
-        let mut shift_jis_ok = !self.candidates[Self::SHIFT_JIS_INDEX].disqualified;
-        let mut euc_jp_ok = !self.candidates[Self::EUC_JP_INDEX].disqualified;
-        if let Some(fallback) = self.fallback {
-            if fallback == EUC_KR && euc_kr_ok {
-                return (EUC_KR, utf);
-            }
-            if fallback == BIG5 {
-                if big5_ok {
-                    return (BIG5, utf);
-                }
-                if gbk_ok {
-                    return (GBK, utf);
-                }
-            }
-            if fallback == GBK {
-                if gbk_ok {
-                    return (GBK, utf);
-                }
-                if big5_ok {
-                    return (BIG5, utf);
-                }
-            }
-            if fallback == SHIFT_JIS {
-                if shift_jis_ok {
-                    return (SHIFT_JIS, utf);
-                }
-                if euc_jp_ok {
-                    return (EUC_JP, utf);
-                }
-            }
-            if fallback == EUC_JP {
-                if euc_jp_ok {
-                    return (EUC_JP, utf);
-                }
-                if shift_jis_ok {
-                    return (SHIFT_JIS, utf);
-                }
-            }
-        }
+        let utf = self.candidates[Self::UTF_8_INDEX].score.is_some() && self.non_ascii_seen > 0;
 
         let mut encoding = WINDOWS_1252;
-        let mut max = i64::min_value() + 1;
-        for candidate in (&self.candidates[Self::FIRST_NORMAL_SINGLE_BYTE..]).iter() {
-            let score = candidate.score();
-            // println!(
-            //     "{} {} {}",
-            //     candidate.encoding().name(),
-            //     score,
-            //     candidate.disqualified
-            // );
-            if !candidate.disqualified && score > max {
-                max = score;
-                encoding = candidate.encoding();
+        let mut max = 0i64;
+        for candidate in (&self.candidates[Self::FIRST_NORMAL..]).iter() {
+            if let Some(score) = candidate.score() {
+                if score > max {
+                    max = score;
+                    encoding = candidate.encoding();
+                }
             }
         }
         let visual = &self.candidates[Self::VISUAL_INDEX];
-        let visual_score = visual.score();
-        if !visual.disqualified
-            && visual_score > max
-            && visual.plausible_punctuation()
-                > self.candidates[Self::LOGICAL_INDEX].plausible_punctuation()
-        {
-            max = visual_score;
-            encoding = ISO_8859_8;
+        if let Some(visual_score) = visual.score() {
+            if visual_score > max
+                && visual.plausible_punctuation()
+                    > self.candidates[Self::LOGICAL_INDEX].plausible_punctuation()
+            {
+                // max = visual_score;
+                encoding = ISO_8859_8;
+            }
         }
 
-        if !self.candidates[Self::EUC_KR_INDEX].ascii_pair_ratio_ok() {
-            euc_kr_ok = false;
-        }
-        if !self.candidates[Self::BIG5_INDEX].ascii_pair_ratio_ok() {
-            big5_ok = false;
-        }
-        if !self.candidates[Self::GBK_INDEX].ascii_pair_ratio_ok()
-            || !self.candidates[Self::GBK_INDEX].pua_ratio_ok()
-            || !self.candidates[Self::GBK_INDEX].gbk_euc_ratio_ok()
-        {
-            gbk_ok = false;
-        }
-        if !self.candidates[Self::SHIFT_JIS_INDEX].ascii_pair_ratio_ok()
-            || !self.candidates[Self::SHIFT_JIS_INDEX].pua_ratio_ok()
-        {
-            shift_jis_ok = false;
-        }
-        if !self.candidates[Self::EUC_JP_INDEX].ascii_pair_ratio_ok() {
-            euc_jp_ok = false;
-        }
-
-        // The most plausible CJK candidate is first decided by mechanism
-        // other than a score, and then a score is computed for that
-        // candidate for comparison with the best single-byte encoding.
-        // It's likely possible to formulate a scoring mechanism that
-        // would have the same outcome, but this formulation makes it
-        // explicit how the legacy CJK encodings are compared relative
-        // to each other.
-        let mut cjk_encoding = SHIFT_JIS;
-        let mut cjk_score = i64::min_value();
-
-        // Loop only broken out of a goto forward.
-        loop {
-            if shift_jis_ok {
-                cjk_score = self.candidates[Self::SHIFT_JIS_INDEX].score();
-                break;
-            }
-            let euc_jp_kana = if euc_jp_ok {
-                self.candidates[Self::EUC_JP_INDEX].euc_jp_kana()
-            } else {
-                0
-            };
-            if euc_jp_kana != 0 {
-                gbk_ok = false;
-            }
-            let (modern_hangul, other_hangul, hanja) =
-                self.candidates[Self::EUC_KR_INDEX].euc_kr_stats();
-            // Arbitrary allowances for Hanja and non-modern Hangul
-            if other_hangul > modern_hangul / 256 || hanja > modern_hangul / 128 {
-                euc_kr_ok = false;
-            }
-            if gbk_ok {
-                if euc_kr_ok {
-                    cjk_encoding = EUC_KR;
-                    cjk_score = self.candidates[Self::EUC_KR_INDEX].score();
-                    break;
-                }
-                cjk_encoding = GBK;
-                cjk_score = self.candidates[Self::GBK_INDEX].score();
-                break;
-            }
-            if euc_jp_ok {
-                // Arbitrary allowance for standalone jamo, which overlap
-                // the kana range.
-                if euc_kr_ok && euc_jp_kana <= modern_hangul / 256 {
-                    cjk_encoding = EUC_KR;
-                    cjk_score = self.candidates[Self::EUC_KR_INDEX].score();
-                    break;
-                }
-                cjk_encoding = EUC_JP;
-                cjk_score = self.candidates[Self::EUC_JP_INDEX].score();
-                break;
-            }
-            if euc_kr_ok {
-                cjk_encoding = EUC_KR;
-                cjk_score = self.candidates[Self::EUC_KR_INDEX].score();
-                break;
-            }
-            if big5_ok {
-                cjk_encoding = BIG5;
-                cjk_score = self.candidates[Self::BIG5_INDEX].score();
-                break;
-            }
-            break;
-        }
-        if cjk_score > max {
-            encoding = cjk_encoding;
-        }
         (encoding, utf)
     }
 
@@ -1862,117 +1608,94 @@ impl EncodingDetector {
     }
 
     // XXX Test-only API
-    pub fn find_score(&self, encoding: &'static Encoding) -> (i64, bool) {
-        for candidate in (&self.candidates[Self::SHIFT_JIS_INDEX..]).iter() {
+    pub fn find_score(&self, encoding: &'static Encoding) -> Option<i64> {
+        for candidate in self.candidates.iter() {
             if encoding == candidate.encoding() {
-                return (candidate.score(), candidate.disqualified);
+                return candidate.score();
             }
         }
-        (0, false)
+        Some(0)
     }
 
     const UTF_8_INDEX: usize = 0;
 
-    const ISO_2022_JP_INDEX: usize = 1;
+    // const SHIFT_JIS_INDEX: usize = 2;
 
-    const SHIFT_JIS_INDEX: usize = 2;
+    // const EUC_JP_INDEX: usize = 3;
 
-    const EUC_JP_INDEX: usize = 3;
+    // const EUC_KR_INDEX: usize = 4;
 
-    const EUC_KR_INDEX: usize = 4;
+    // const BIG5_INDEX: usize = 5;
 
-    const BIG5_INDEX: usize = 5;
+    // const GBK_INDEX: usize = 6;
 
-    const GBK_INDEX: usize = 6;
+    // const FIRST_SINGLE_BYTE: usize = 7;
 
-    const FIRST_SINGLE_BYTE: usize = 7;
+    const FIRST_NORMAL: usize = 2;
 
-    const FIRST_NORMAL_SINGLE_BYTE: usize = 8;
+    const VISUAL_INDEX: usize = 1;
 
-    const VISUAL_INDEX: usize = 7;
+    const LOGICAL_INDEX: usize = 14;
 
-    const LOGICAL_INDEX: usize = 15;
+    // const WINDOWS_1250_SINGLE_BYTE: usize = 10;
 
-    const WINDOWS_1250_SINGLE_BYTE: usize = 10;
+    // const WINDOWS_1251_SINGLE_BYTE: usize = 9;
 
-    const WINDOWS_1251_SINGLE_BYTE: usize = 9;
+    // const WINDOWS_1252_SINGLE_BYTE: usize = 8;
 
-    const WINDOWS_1252_SINGLE_BYTE: usize = 8;
+    // const WINDOWS_1253_SINGLE_BYTE: usize = 16;
 
-    const WINDOWS_1253_SINGLE_BYTE: usize = 16;
+    // const WINDOWS_1254_SINGLE_BYTE: usize = 13;
 
-    const WINDOWS_1254_SINGLE_BYTE: usize = 13;
+    // const WINDOWS_1255_SINGLE_BYTE: usize = 15;
 
-    const WINDOWS_1255_SINGLE_BYTE: usize = 15;
+    // const WINDOWS_1256_SINGLE_BYTE: usize = 12;
 
-    const WINDOWS_1256_SINGLE_BYTE: usize = 12;
+    // const WINDOWS_1257_SINGLE_BYTE: usize = 18;
 
-    const WINDOWS_1257_SINGLE_BYTE: usize = 18;
+    // const WINDOWS_1258_SINGLE_BYTE: usize = 22;
 
-    const WINDOWS_1258_SINGLE_BYTE: usize = 22;
+    // const ISO_8859_3_SINGLE_BYTE: usize = 11;
 
-    const ISO_8859_3_SINGLE_BYTE: usize = 11;
+    // const ISO_8859_4_SINGLE_BYTE: usize = 23;
 
-    const ISO_8859_4_SINGLE_BYTE: usize = 23;
+    // const ISO_8859_5_SINGLE_BYTE: usize = 24;
 
-    const ISO_8859_5_SINGLE_BYTE: usize = 24;
-
-    const ISO_8859_6_SINGLE_BYTE: usize = 21;
+    // const ISO_8859_6_SINGLE_BYTE: usize = 21;
 
     pub fn new_with_fallback(fallback: Option<&'static Encoding>) -> Self {
-        let mut det = EncodingDetector {
+        EncodingDetector {
             candidates: [
                 Candidate::new_utf_8(),                                                // 0
-                Candidate::new_iso_2022_jp(),                                          // 1
-                Candidate::new_shift_jis(),                                            // 2
+                Candidate::new_visual(&SINGLE_BYTE_DATA[ISO_8859_8_INDEX]),            // 1
+                Candidate::new_gbk(),                                                  // 2
                 Candidate::new_euc_jp(),                                               // 3
                 Candidate::new_euc_kr(),                                               // 4
-                Candidate::new_big5(),                                                 // 5
-                Candidate::new_gbk(),                                                  // 6
-                Candidate::new_visual(&SINGLE_BYTE_DATA[ISO_8859_8_INDEX]),            // 7
-                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1252_INDEX]),           // 8
-                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[WINDOWS_1251_INDEX]), // 9
-                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1250_INDEX]),           // 10
-                Candidate::new_latin(&SINGLE_BYTE_DATA[ISO_8859_2_INDEX]),             // 11
-                Candidate::new_arabic_french(&SINGLE_BYTE_DATA[WINDOWS_1256_INDEX]),   // 12
-                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1254_INDEX]),           // 13
-                Candidate::new_caseless(&SINGLE_BYTE_DATA[WINDOWS_874_INDEX]),         // 14
-                Candidate::new_logical(&SINGLE_BYTE_DATA[WINDOWS_1255_INDEX]),         // 15
-                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[WINDOWS_1253_INDEX]), // 16
-                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[ISO_8859_7_INDEX]),   // 17
-                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1257_INDEX]),           // 18
-                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[KOI8_U_INDEX]),       // 19
-                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[IBM866_INDEX]),       // 20
-                Candidate::new_caseless(&SINGLE_BYTE_DATA[ISO_8859_6_INDEX]),          // 21
-                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1258_INDEX]),           // 22
-                Candidate::new_latin(&SINGLE_BYTE_DATA[ISO_8859_4_INDEX]),             // 23
-                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[ISO_8859_5_INDEX]),   // 24
+                Candidate::new_shift_jis(),                                            // 5
+                Candidate::new_big5(),                                                 // 6
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1252_INDEX]),           // 7
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[WINDOWS_1251_INDEX]), // 8
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1250_INDEX]),           // 9
+                Candidate::new_latin(&SINGLE_BYTE_DATA[ISO_8859_2_INDEX]),             // 10
+                Candidate::new_arabic_french(&SINGLE_BYTE_DATA[WINDOWS_1256_INDEX]),   // 11
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1254_INDEX]),           // 12
+                Candidate::new_caseless(&SINGLE_BYTE_DATA[WINDOWS_874_INDEX]),         // 13
+                Candidate::new_logical(&SINGLE_BYTE_DATA[WINDOWS_1255_INDEX]),         // 14
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[WINDOWS_1253_INDEX]), // 15
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[ISO_8859_7_INDEX]),   // 16
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1257_INDEX]),           // 17
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[KOI8_U_INDEX]),       // 18
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[IBM866_INDEX]),       // 19
+                Candidate::new_caseless(&SINGLE_BYTE_DATA[ISO_8859_6_INDEX]),          // 20
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1258_INDEX]),           // 21
+                Candidate::new_latin(&SINGLE_BYTE_DATA[ISO_8859_4_INDEX]),             // 22
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[ISO_8859_5_INDEX]),   // 23
             ],
             non_ascii_seen: 0,
             fallback: fallback,
             last_before_non_ascii: None,
             esc_seen: false,
-        };
-        // When in doubt, guess windows-1252
-        // det.candidates[Self::WINDOWS_1252_SINGLE_BYTE].add_to_score(10);
-
-        // It's questionable whether ISO-8859-4 should even be a possible outcome.
-        // det.candidates[Self::ISO_8859_4_SINGLE_BYTE].add_to_score(-10);
-        // For short strings, windows-1257 gets confused with windows-1252 a lot
-        // det.candidates[Self::WINDOWS_1257_SINGLE_BYTE].add_to_score(0);
-
-        // For short strings, windows-1250 gets confused with windows-1252 a lot
-        // det.candidates[Self::WINDOWS_1250_SINGLE_BYTE].add_to_score(0);
-
-        if let Some(fallback) = fallback {
-            for single_byte in det.candidates[Self::FIRST_SINGLE_BYTE..].iter_mut() {
-                if single_byte.encoding() == fallback {
-                    single_byte.add_to_score(1);
-                    break;
-                }
-            }
         }
-        det
     }
 }
 
