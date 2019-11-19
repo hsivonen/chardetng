@@ -48,23 +48,29 @@ const NON_LATIN_IMPLAUSIBLE_CASE_TRANSITION_PENALTY: i64 = -100;
 
 const CJK_BASE_SCORE: i64 = 20;
 
-const SHIFT_JIS_SCORE_PER_KANA: i64 = CJK_BASE_SCORE;
+const CJK_SECONDARY_BASE_SCORE: i64 = 20;
 
-const SHIFT_JIS_SCORE_PER_KANJI: i64 = CJK_BASE_SCORE;
+const SHIFT_JIS_SCORE_PER_KANA: i64 = 20;
 
-const SHIFT_JIS_PUA_PENALTY: i64 = -(CJK_BASE_SCORE / 2); // Should this be larger?
+const SHIFT_JIS_SCORE_PER_KANJI: i64 = SHIFT_JIS_SCORE_PER_KANA;
+
+const SHIFT_JIS_PUA_PENALTY: i64 = -(SHIFT_JIS_SCORE_PER_KANA / 2); // Should this be larger?
 
 const EUC_JP_SCORE_PER_KANA: i64 = CJK_BASE_SCORE + (CJK_BASE_SCORE / 3); // Relative to Big5
 
 const EUC_JP_SCORE_PER_NEAR_OBSOLETE_KANA: i64 = CJK_BASE_SCORE - 1;
 
-const EUC_JP_SCORE_PER_KANJI: i64 = CJK_BASE_SCORE;
+const EUC_JP_SCORE_PER_LEVEL_1_KANJI: i64 = CJK_BASE_SCORE;
+
+const EUC_JP_SCORE_PER_LEVEL_2_KANJI: i64 = CJK_SECONDARY_BASE_SCORE;
+
+const EUC_JP_SCORE_PER_OTHER_KANJI: i64 = CJK_SECONDARY_BASE_SCORE / 4;
 
 const EUC_JP_INITIAL_KANA_PENALTY: i64 = -((CJK_BASE_SCORE / 3) + 1);
 
 const BIG5_SCORE_PER_LEVEL_1_HANZI: i64 = CJK_BASE_SCORE;
 
-const BIG5_SCORE_PER_OTHER_HANZI: i64 = CJK_BASE_SCORE; // XXX
+const BIG5_SCORE_PER_OTHER_HANZI: i64 = CJK_SECONDARY_BASE_SCORE;
 
 const EUC_KR_SCORE_PER_EUC_HANGUL: i64 = CJK_BASE_SCORE + 1;
 
@@ -78,17 +84,17 @@ const EUC_KR_LONG_WORD_PENALTY: i64 = -6;
 
 const GBK_SCORE_PER_LEVEL_1: i64 = CJK_BASE_SCORE;
 
-const GBK_SCORE_PER_LEVEL_2: i64 = CJK_BASE_SCORE; // XXX
+const GBK_SCORE_PER_LEVEL_2: i64 = CJK_SECONDARY_BASE_SCORE;
 
-const GBK_SCORE_PER_NON_EUC: i64 = CJK_BASE_SCORE / 4;
+const GBK_SCORE_PER_NON_EUC: i64 = CJK_SECONDARY_BASE_SCORE / 4;
 
-const GBK_PUA_PENALTY: i64 = -(CJK_BASE_SCORE / 2); // Should this be larger?
+const GBK_PUA_PENALTY: i64 = -(CJK_BASE_SCORE * 2); // Should this be larger?
 
 const CJK_LATIN_ADJACENCY_PENALTY: i64 = -30; // smaller penalty than LATIN_ADJACENCY_PENALTY
 
 const CJ_PUNCTUATION: i64 = CJK_BASE_SCORE / 2;
 
-const CJK_OTHER: i64 = CJK_BASE_SCORE / 4;
+const CJK_OTHER: i64 = CJK_SECONDARY_BASE_SCORE / 4;
 
 /// Latin letter caseless class
 const LATIN_LETTER: u8 = 2;
@@ -945,21 +951,22 @@ struct EucJpCandidate {
     decoder: Decoder,
     non_ascii_seen: bool,
     prev: LatinCj,
+    prev_byte: u8,
+    prev_prev_byte: u8,
 }
 
 impl EucJpCandidate {
     fn feed(&mut self, buffer: &[u8], last: bool) -> Option<i64> {
         let mut score = 0i64;
-        let mut dst = [0u16; 1024];
-        let mut total_read = 0;
-        loop {
-            let (result, read, written) = self.decoder.decode_to_utf16_without_replacement(
-                &buffer[total_read..],
-                &mut dst,
-                last,
-            );
-            total_read += read;
-            for &u in dst[..written].iter() {
+        let mut src = [0u8];
+        let mut dst = [0u16; 2];
+        for &b in buffer {
+            src[0] = b;
+            let (result, read, written) = self
+                .decoder
+                .decode_to_utf16_without_replacement(&src, &mut dst, false);
+            if written > 0 {
+                let u = dst[0];
                 if !self.non_ascii_seen && u >= 0x80 {
                     self.non_ascii_seen = true;
                     if u >= 0xFF61 && u <= 0xFF9F {
@@ -997,7 +1004,13 @@ impl EucJpCandidate {
                     }
                     self.prev = LatinCj::Cj;
                 } else if (u >= 0x3400 && u < 0xA000) || (u >= 0xF900 && u < 0xFB00) {
-                    score += EUC_JP_SCORE_PER_KANJI;
+                    if self.prev_prev_byte == 0x8F {
+                        score += EUC_JP_SCORE_PER_OTHER_KANJI;
+                    } else if self.prev_byte < 0xD0 {
+                        score += EUC_JP_SCORE_PER_LEVEL_1_KANJI;
+                    } else {
+                        score += EUC_JP_SCORE_PER_LEVEL_2_KANJI;
+                    }
                     if self.prev == LatinCj::AsciiLetter {
                         score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
@@ -1022,16 +1035,33 @@ impl EucJpCandidate {
             }
             match result {
                 DecoderResult::InputEmpty => {
-                    return Some(score);
+                    assert_eq!(read, 1);
                 }
                 DecoderResult::Malformed(_, _) => {
                     return None;
                 }
                 DecoderResult::OutputFull => {
-                    continue;
+                    unreachable!();
+                }
+            }
+            self.prev_prev_byte = self.prev_byte;
+            self.prev_byte = b;
+        }
+        if last {
+            let (result, _, _) = self
+                .decoder
+                .decode_to_utf16_without_replacement(b"", &mut dst, true);
+            match result {
+                DecoderResult::InputEmpty => {}
+                DecoderResult::Malformed(_, _) => {
+                    return None;
+                }
+                DecoderResult::OutputFull => {
+                    unreachable!();
                 }
             }
         }
+        Some(score)
     }
 }
 
@@ -1098,12 +1128,17 @@ impl Big5Candidate {
                     self.prev = LatinCj::Other;
                 }
             } else if written == 2 {
-                assert!(dst[0] >= 0xD480 && dst[0] < 0xD880);
-                score += BIG5_SCORE_PER_OTHER_HANZI;
-                if self.prev == LatinCj::AsciiLetter {
-                    score += CJK_LATIN_ADJACENCY_PENALTY;
+                if dst[0] == 0xCA || dst[0] == 0xEA {
+                    score += CJK_OTHER;
+                    self.prev = LatinCj::Other;
+                } else {
+                    assert!(dst[0] >= 0xD480 && dst[0] < 0xD880);
+                    score += BIG5_SCORE_PER_OTHER_HANZI;
+                    if self.prev == LatinCj::AsciiLetter {
+                        score += CJK_LATIN_ADJACENCY_PENALTY;
+                    }
+                    self.prev = LatinCj::Cj;
                 }
-                self.prev = LatinCj::Cj;
             }
             match result {
                 DecoderResult::InputEmpty => {
@@ -1444,6 +1479,8 @@ impl Candidate {
                 decoder: EUC_JP.new_decoder_without_bom_handling(),
                 non_ascii_seen: false,
                 prev: LatinCj::Other,
+                prev_byte: 0,
+                prev_prev_byte: 0,
             }),
             score: Some(0),
         }
