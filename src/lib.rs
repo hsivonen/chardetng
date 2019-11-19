@@ -74,7 +74,9 @@ const EUC_KR_HANJA_AFTER_HANGUL_PENALTY: i64 = -(CJK_BASE_SCORE * 10);
 
 const EUC_KR_LONG_WORD_PENALTY: i64 = -6;
 
-const GBK_SCORE_PER_EUC: i64 = CJK_BASE_SCORE;
+const GBK_SCORE_PER_LEVEL_1: i64 = CJK_BASE_SCORE;
+
+const GBK_SCORE_PER_LEVEL_2: i64 = CJK_BASE_SCORE;
 
 const GBK_SCORE_PER_NON_EUC: i64 = CJK_BASE_SCORE / 4;
 
@@ -713,7 +715,7 @@ enum LatinKorean {
 
 struct GbkCandidate {
     decoder: Decoder,
-    prev_was_euc_range: bool,
+    prev_byte: u8,
     prev: LatinCj,
 }
 
@@ -723,7 +725,6 @@ impl GbkCandidate {
         let mut src = [0u8];
         let mut dst = [0u16; 2];
         for &b in buffer {
-            let in_euc_range = b >= 0xA1 && b <= 0xFE;
             src[0] = b;
             let (result, read, written) = self
                 .decoder
@@ -738,8 +739,16 @@ impl GbkCandidate {
                     }
                     self.prev = LatinCj::AsciiLetter;
                 } else if u >= 0x4E00 && u <= 0x9FA5 {
-                    if self.prev_was_euc_range && in_euc_range {
-                        score += GBK_SCORE_PER_EUC;
+                    if b >= 0xA1 && b <= 0xFE {
+                        match self.prev_byte {
+                            0xA1..=0xD7 => {
+                                score += GBK_SCORE_PER_LEVEL_1;
+                            }
+                            0xD8..=0xFE => score += GBK_SCORE_PER_LEVEL_2,
+                            _ => {
+                                score += GBK_SCORE_PER_NON_EUC;
+                            }
+                        }
                     } else {
                         score += GBK_SCORE_PER_NON_EUC;
                     }
@@ -827,7 +836,7 @@ impl GbkCandidate {
                     unreachable!();
                 }
             }
-            self.prev_was_euc_range = in_euc_range;
+            self.prev_byte = b;
         }
         if last {
             let (result, _, _) = self
