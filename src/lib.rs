@@ -46,7 +46,7 @@ const NON_LATIN_CAMEL_PENALTY: i64 = -80;
 
 const NON_LATIN_IMPLAUSIBLE_CASE_TRANSITION_PENALTY: i64 = -100;
 
-const CJK_BASE_SCORE: i64 = 75;
+const CJK_BASE_SCORE: i64 = 20;
 
 const SHIFT_JIS_SCORE_PER_KANA: i64 = CJK_BASE_SCORE;
 
@@ -71,6 +71,8 @@ const EUC_KR_SCORE_PER_NON_EUC_HANGUL: i64 = CJK_BASE_SCORE / 5;
 const EUC_KR_SCORE_PER_HANJA: i64 = CJK_BASE_SCORE - 1;
 
 const EUC_KR_HANJA_AFTER_HANGUL_PENALTY: i64 = -(CJK_BASE_SCORE * 10);
+
+const EUC_KR_LONG_WORD_PENALTY: i64 = -6;
 
 const GBK_SCORE_PER_EUC: i64 = CJK_BASE_SCORE;
 
@@ -270,6 +272,7 @@ impl NonLatinCasedCandidate {
                 }
             }
 
+            // XXX Apply penalty if > 16
             if non_ascii_alphabetic {
                 self.current_word_len += 1;
             } else {
@@ -334,6 +337,8 @@ impl LatinCandidate {
                 _ => -200,
             };
             score += non_ascii_penalty;
+            // XXX if has Vietnamese-only characters and word length > 7,
+            // apply penalty
 
             if !self.data.is_latin_alphabetic(caseless_class) {
                 self.case_state = LatinCaseState::Space;
@@ -438,6 +443,7 @@ impl ArabicFrenchCandidate {
 
             // Count only Arabic word length and ignore French
             let non_ascii_alphabetic = self.data.is_non_latin_alphabetic(caseless_class);
+            // XXX apply penalty if > 23
             if non_ascii_alphabetic {
                 self.current_word_len += 1;
             } else {
@@ -498,6 +504,7 @@ impl CaselessCandidate {
             let ascii_pair = self.prev_ascii && ascii;
 
             let non_ascii_alphabetic = self.data.is_non_latin_alphabetic(caseless_class);
+            // Apply penalty if > 23 and not Thai
             if non_ascii_alphabetic {
                 self.current_word_len += 1;
             } else {
@@ -560,6 +567,7 @@ impl LogicalCandidate {
             let ascii_pair = self.prev_ascii && ascii;
 
             let non_ascii_alphabetic = self.data.is_non_latin_alphabetic(caseless_class);
+            // XXX apply penalty if > 22
             if non_ascii_alphabetic {
                 self.current_word_len += 1;
             } else {
@@ -625,6 +633,7 @@ impl VisualCandidate {
             let ascii_pair = self.prev_ascii && ascii;
 
             let non_ascii_alphabetic = self.data.is_non_latin_alphabetic(caseless_class);
+            // XXX apply penalty if > 22
             if non_ascii_alphabetic {
                 self.current_word_len += 1;
             } else {
@@ -784,6 +793,7 @@ impl GbkCandidate {
                         => {
                             score += CJ_PUNCTUATION;
                         }
+                        0..=0x7F => {}
                         _ => {
                             score += CJK_OTHER;
                         }
@@ -897,6 +907,7 @@ impl ShiftJisCandidate {
                             // common byte pairs anyway.
                             score += CJ_PUNCTUATION;
                         }
+                        0..=0x7F => {}
                         _ => {
                             score += CJK_OTHER;
                         }
@@ -990,6 +1001,7 @@ impl EucJpCandidate {
                         => {
                             score += CJ_PUNCTUATION;
                         }
+                        0..=0x7F => {}
                         _ => {
                             score += CJK_OTHER;
                         }
@@ -1063,6 +1075,7 @@ impl Big5Candidate {
                             // common byte pairs anyway.
                             score += CJ_PUNCTUATION;
                         }
+                        0..=0x7F => {}
                         _ => {
                             score += CJK_OTHER;
                         }
@@ -1089,6 +1102,7 @@ struct EucKrCandidate {
     decoder: Decoder,
     prev_was_euc_range: bool,
     prev: LatinKorean,
+    current_word_len: u64,
 }
 
 impl EucKrCandidate {
@@ -1114,6 +1128,7 @@ impl EucKrCandidate {
                         _ => {}
                     }
                     self.prev = LatinKorean::AsciiLetter;
+                    self.current_word_len = 0;
                 } else if u >= 0xAC00 && u <= 0xD7A3 {
                     if self.prev_was_euc_range && in_euc_range {
                         score += EUC_KR_SCORE_PER_EUC_HANGUL;
@@ -1124,7 +1139,10 @@ impl EucKrCandidate {
                         score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
                     self.prev = LatinKorean::Hangul;
-                // XXX Count word length and apply mild penalty if length > 5
+                    self.current_word_len += 1;
+                    if self.current_word_len > 5 {
+                        score += EUC_KR_LONG_WORD_PENALTY;
+                    }
                 } else if (u >= 0x4E00 && u < 0xAC00) || (u >= 0xF900 && u <= 0xFA0B) {
                     score += EUC_KR_SCORE_PER_HANJA;
                     match self.prev {
@@ -1137,9 +1155,16 @@ impl EucKrCandidate {
                         _ => {}
                     }
                     self.prev = LatinKorean::Hanja;
+                    self.current_word_len += 1;
+                    if self.current_word_len > 5 {
+                        score += EUC_KR_LONG_WORD_PENALTY;
+                    }
                 } else {
-                    score += CJK_OTHER;
+                    if u >= 0x80 {
+                        score += CJK_OTHER;
+                    }
                     self.prev = LatinKorean::Other;
+                    self.current_word_len = 0;
                 }
             }
             match result {
@@ -1392,6 +1417,7 @@ impl Candidate {
                 decoder: EUC_KR.new_decoder_without_bom_handling(),
                 prev_was_euc_range: false,
                 prev: LatinKorean::Other,
+                current_word_len: 0,
             }),
             score: Some(0),
         }
