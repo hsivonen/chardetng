@@ -721,6 +721,14 @@ enum LatinKorean {
     Other,
 }
 
+fn cjk_extra_score(u: u16, table: &'static [u16; 128]) -> i64 {
+    if let Some(pos) = table.iter().position(|&x| x == u) {
+        ((128 - pos) / 16) as i64
+    } else {
+        0
+    }
+}
+
 struct GbkCandidate {
     decoder: Decoder,
     prev_byte: u8,
@@ -751,6 +759,8 @@ impl GbkCandidate {
                         match self.prev_byte {
                             0xA1..=0xD7 => {
                                 score += GBK_SCORE_PER_LEVEL_1;
+                                score +=
+                                    cjk_extra_score(u, &data::DETECTOR_DATA.frequent_simplified);
                             }
                             0xD8..=0xFE => score += GBK_SCORE_PER_LEVEL_2,
                             _ => {
@@ -1008,6 +1018,7 @@ impl EucJpCandidate {
                         score += EUC_JP_SCORE_PER_OTHER_KANJI;
                     } else if self.prev_byte < 0xD0 {
                         score += EUC_JP_SCORE_PER_LEVEL_1_KANJI;
+                        score += cjk_extra_score(u, &data::DETECTOR_DATA.frequent_kanji);
                     } else {
                         score += EUC_JP_SCORE_PER_LEVEL_2_KANJI;
                     }
@@ -1094,6 +1105,7 @@ impl Big5Candidate {
                     match self.prev_byte {
                         0xA4..=0xC6 => {
                             score += BIG5_SCORE_PER_LEVEL_1_HANZI;
+                            score += cjk_extra_score(u, &data::DETECTOR_DATA.frequent_traditional);
                         }
                         _ => {
                             score += BIG5_SCORE_PER_OTHER_HANZI;
@@ -1205,6 +1217,7 @@ impl EucKrCandidate {
                 } else if u >= 0xAC00 && u <= 0xD7A3 {
                     if self.prev_was_euc_range && in_euc_range {
                         score += EUC_KR_SCORE_PER_EUC_HANGUL;
+                        score += cjk_extra_score(u, &data::DETECTOR_DATA.frequent_hangul);
                     } else {
                         score += EUC_KR_SCORE_PER_NON_EUC_HANGUL;
                     }
