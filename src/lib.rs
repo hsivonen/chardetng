@@ -55,7 +55,9 @@ const SHIFT_JIS_SCORE_PER_KANA: i64 = 20;
 
 const SHIFT_JIS_SCORE_PER_KANJI: i64 = SHIFT_JIS_SCORE_PER_KANA;
 
-const SHIFT_JIS_PUA_PENALTY: i64 = -(SHIFT_JIS_SCORE_PER_KANA / 2); // Should this be larger?
+const HALF_WIDTH_KATAKANA_PENALTY: i64 = -(CJK_BASE_SCORE * 3);
+
+const SHIFT_JIS_PUA_PENALTY: i64 = -(CJK_BASE_SCORE * 10); // Should this be larger?
 
 const EUC_JP_SCORE_PER_KANA: i64 = CJK_BASE_SCORE + (CJK_BASE_SCORE / 3); // Relative to Big5
 
@@ -879,25 +881,30 @@ struct ShiftJisCandidate {
     decoder: Decoder,
     non_ascii_seen: bool,
     prev: LatinCj,
+    prev_byte: u8,
 }
 
 impl ShiftJisCandidate {
     fn feed(&mut self, buffer: &[u8], last: bool) -> Option<i64> {
         let mut score = 0i64;
-        let mut dst = [0u16; 1024];
-        let mut total_read = 0;
-        loop {
-            let (result, read, written) = self.decoder.decode_to_utf16_without_replacement(
-                &buffer[total_read..],
-                &mut dst,
-                last,
-            );
-            total_read += read;
-            for &u in dst[..written].iter() {
+        let mut src = [0u8];
+        let mut dst = [0u16; 2];
+        for &b in buffer {
+            src[0] = b;
+            let (result, read, written) = self
+                .decoder
+                .decode_to_utf16_without_replacement(&src, &mut dst, false);
+            if written > 0 {
+                let u = dst[0];
                 if !self.non_ascii_seen && u >= 0x80 {
                     self.non_ascii_seen = true;
                     if u >= 0xFF61 && u <= 0xFF9F {
                         return None;
+                    }
+                    if u >= 0x3040 && u < 0x3100 {
+                        // Remove the kana advantage over initial Big5
+                        // hanzi.
+                        score += EUC_JP_INITIAL_KANA_PENALTY;
                     }
                 }
                 if (u >= u16::from(b'a') && u <= u16::from(b'z'))
@@ -907,14 +914,32 @@ impl ShiftJisCandidate {
                         score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
                     self.prev = LatinCj::AsciiLetter;
-                } else if u >= 0x3040 && u < 0x3100 {
-                    score += SHIFT_JIS_SCORE_PER_KANA;
+                } else if u >= 0xFF61 && u <= 0xFF9F {
+                    score += HALF_WIDTH_KATAKANA_PENALTY;
+                } else if (u >= 0x3041 && u <= 0x3093) || (u >= 0x30A1 && u <= 0x30F6) {
+                    match u {
+                        0x3090 // hiragana wi
+                        | 0x3091 // hiragana we
+                        | 0x30F0 // katakana wi
+                        | 0x30F1 // katakana we
+                        => {
+                            score += EUC_JP_SCORE_PER_NEAR_OBSOLETE_KANA;
+                        }
+                        _ => {
+                            score += EUC_JP_SCORE_PER_KANA;
+                        }
+                    }
                     if self.prev == LatinCj::AsciiLetter {
                         score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
                     self.prev = LatinCj::Cj;
                 } else if (u >= 0x3400 && u < 0xA000) || (u >= 0xF900 && u < 0xFB00) {
-                    score += SHIFT_JIS_SCORE_PER_KANJI;
+                    if self.prev_byte < 0x98 || (self.prev_byte == 0x98 && b < 0x73) {
+                        score += EUC_JP_SCORE_PER_LEVEL_1_KANJI;
+                        score += cjk_extra_score(u, &data::DETECTOR_DATA.frequent_kanji);
+                    } else {
+                        score += EUC_JP_SCORE_PER_LEVEL_2_KANJI;
+                    }
                     if self.prev == LatinCj::AsciiLetter {
                         score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
@@ -945,16 +970,32 @@ impl ShiftJisCandidate {
             }
             match result {
                 DecoderResult::InputEmpty => {
-                    return Some(score);
+                    assert_eq!(read, 1);
                 }
                 DecoderResult::Malformed(_, _) => {
                     return None;
                 }
                 DecoderResult::OutputFull => {
-                    continue;
+                    unreachable!();
+                }
+            }
+            self.prev_byte = b;
+        }
+        if last {
+            let (result, _, _) = self
+                .decoder
+                .decode_to_utf16_without_replacement(b"", &mut dst, true);
+            match result {
+                DecoderResult::InputEmpty => {}
+                DecoderResult::Malformed(_, _) => {
+                    return None;
+                }
+                DecoderResult::OutputFull => {
+                    unreachable!();
                 }
             }
         }
+        Some(score)
     }
 }
 
@@ -996,6 +1037,8 @@ impl EucJpCandidate {
                         score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
                     self.prev = LatinCj::AsciiLetter;
+                } else if u >= 0xFF61 && u <= 0xFF9F {
+                    score += HALF_WIDTH_KATAKANA_PENALTY;
                 } else if (u >= 0x3041 && u <= 0x3093) || (u >= 0x30A1 && u <= 0x30F6) {
                     match u {
                         0x3090 // hiragana wi
@@ -1482,6 +1525,7 @@ impl Candidate {
                 decoder: SHIFT_JIS.new_decoder_without_bom_handling(),
                 non_ascii_seen: false,
                 prev: LatinCj::Other,
+                prev_byte: 0,
             }),
             score: Some(0),
         }
