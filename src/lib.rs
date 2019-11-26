@@ -28,7 +28,7 @@ use encoding_rs::WINDOWS_874;
 mod data;
 use data::*;
 
-const LATIN_ADJACENCY_PENALTY: i64 = -40;
+const LATIN_ADJACENCY_PENALTY: i64 = -50;
 
 const IMPLAUSIBILITY_PENALTY: i64 = -220;
 
@@ -93,7 +93,7 @@ const GBK_SCORE_PER_NON_EUC: i64 = CJK_SECONDARY_BASE_SCORE / 4;
 
 const GBK_PUA_PENALTY: i64 = -(CJK_BASE_SCORE * 10); // Factor should be at least 2, but should it be larger?
 
-const CJK_LATIN_ADJACENCY_PENALTY: i64 = -30; // smaller penalty than LATIN_ADJACENCY_PENALTY
+const CJK_LATIN_ADJACENCY_PENALTY: i64 = -40; // smaller penalty than LATIN_ADJACENCY_PENALTY
 
 const CJ_PUNCTUATION: i64 = CJK_BASE_SCORE / 2;
 
@@ -877,137 +877,33 @@ impl GbkCandidate {
     }
 }
 
-struct ShiftJisCandidate {
+struct JapaneseCandidate {
     decoder: Decoder,
+    pending_score: Option<i64>,
     non_ascii_seen: bool,
     prev: LatinCj,
     prev_byte: u8,
+    prev_prev_byte: u8,     // unused for Shift_JIS
+    euc_jp_plane_shift: u8, // constant
+    level2_start: u8,       // constant
+    level1_end: u8,         // constant
 }
 
-impl ShiftJisCandidate {
-    fn feed(&mut self, buffer: &[u8], last: bool) -> Option<i64> {
-        let mut score = 0i64;
-        let mut src = [0u8];
-        let mut dst = [0u16; 2];
-        for &b in buffer {
-            src[0] = b;
-            let (result, read, written) = self
-                .decoder
-                .decode_to_utf16_without_replacement(&src, &mut dst, false);
-            if written > 0 {
-                let u = dst[0];
-                if !self.non_ascii_seen && u >= 0x80 {
-                    self.non_ascii_seen = true;
-                    if u >= 0xFF61 && u <= 0xFF9F {
-                        return None;
-                    }
-                    if u >= 0x3040 && u < 0x3100 {
-                        // Remove the kana advantage over initial Big5
-                        // hanzi.
-                        score += EUC_JP_INITIAL_KANA_PENALTY;
-                    }
-                }
-                if (u >= u16::from(b'a') && u <= u16::from(b'z'))
-                    || (u >= u16::from(b'A') && u <= u16::from(b'Z'))
-                {
-                    if self.prev == LatinCj::Cj {
-                        score += CJK_LATIN_ADJACENCY_PENALTY;
-                    }
-                    self.prev = LatinCj::AsciiLetter;
-                } else if u >= 0xFF61 && u <= 0xFF9F {
-                    score += HALF_WIDTH_KATAKANA_PENALTY;
-                } else if (u >= 0x3041 && u <= 0x3093) || (u >= 0x30A1 && u <= 0x30F6) {
-                    match u {
-                        0x3090 // hiragana wi
-                        | 0x3091 // hiragana we
-                        | 0x30F0 // katakana wi
-                        | 0x30F1 // katakana we
-                        => {
-                            score += EUC_JP_SCORE_PER_NEAR_OBSOLETE_KANA;
-                        }
-                        _ => {
-                            score += EUC_JP_SCORE_PER_KANA;
-                        }
-                    }
-                    if self.prev == LatinCj::AsciiLetter {
-                        score += CJK_LATIN_ADJACENCY_PENALTY;
-                    }
-                    self.prev = LatinCj::Cj;
-                } else if (u >= 0x3400 && u < 0xA000) || (u >= 0xF900 && u < 0xFB00) {
-                    if self.prev_byte < 0x98 || (self.prev_byte == 0x98 && b < 0x73) {
-                        score += EUC_JP_SCORE_PER_LEVEL_1_KANJI;
-                        score += cjk_extra_score(u, &data::DETECTOR_DATA.frequent_kanji);
-                    } else {
-                        score += EUC_JP_SCORE_PER_LEVEL_2_KANJI;
-                    }
-                    if self.prev == LatinCj::AsciiLetter {
-                        score += CJK_LATIN_ADJACENCY_PENALTY;
-                    }
-                    self.prev = LatinCj::Cj;
-                } else if u >= 0xE000 && u < 0xF900 {
-                    score += SHIFT_JIS_PUA_PENALTY;
-                    self.prev = LatinCj::Other;
-                } else {
-                    match u {
-                        0x3000 // Distinct from Korean, space
-                        | 0x3001 // Distinct from Korean, enumeration comma
-                        | 0x3002 // Distinct from Korean, full stop
-                        | 0xFF08 // Distinct from Korean, parenthesis
-                        | 0xFF09 // Distinct from Korean, parenthesis
-                        => {
-                            // Not really needed for CJK distinction
-                            // but let's give non-zero score for these
-                            // common byte pairs anyway.
-                            score += CJ_PUNCTUATION;
-                        }
-                        0..=0x7F => {}
-                        _ => {
-                            score += CJK_OTHER;
-                        }
-                    }
-                    self.prev = LatinCj::Other;
-                }
-            }
-            match result {
-                DecoderResult::InputEmpty => {
-                    assert_eq!(read, 1);
-                }
-                DecoderResult::Malformed(_, _) => {
-                    return None;
-                }
-                DecoderResult::OutputFull => {
-                    unreachable!();
-                }
-            }
-            self.prev_byte = b;
+fn problematic_lead(b: u8) -> bool {
+    b == 0x92
+}
+
+impl JapaneseCandidate {
+    fn maybe_set_as_pending(&mut self, s: i64) -> i64 {
+        assert!(self.pending_score.is_none());
+        if self.prev == LatinCj::Cj || !problematic_lead(self.prev_byte) {
+            s
+        } else {
+            self.pending_score = Some(s);
+            0
         }
-        if last {
-            let (result, _, _) = self
-                .decoder
-                .decode_to_utf16_without_replacement(b"", &mut dst, true);
-            match result {
-                DecoderResult::InputEmpty => {}
-                DecoderResult::Malformed(_, _) => {
-                    return None;
-                }
-                DecoderResult::OutputFull => {
-                    unreachable!();
-                }
-            }
-        }
-        Some(score)
     }
-}
 
-struct EucJpCandidate {
-    decoder: Decoder,
-    non_ascii_seen: bool,
-    prev: LatinCj,
-    prev_byte: u8,
-    prev_prev_byte: u8,
-}
-
-impl EucJpCandidate {
     fn feed(&mut self, buffer: &[u8], last: bool) -> Option<i64> {
         let mut score = 0i64;
         let mut src = [0u8];
@@ -1033,13 +929,23 @@ impl EucJpCandidate {
                 if (u >= u16::from(b'a') && u <= u16::from(b'z'))
                     || (u >= u16::from(b'A') && u <= u16::from(b'Z'))
                 {
+                    self.pending_score = None; // Discard pending score
                     if self.prev == LatinCj::Cj {
                         score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
                     self.prev = LatinCj::AsciiLetter;
                 } else if u >= 0xFF61 && u <= 0xFF9F {
+                    if let Some(pending) = self.pending_score {
+                        score += pending;
+                        self.pending_score = None;
+                    }
                     score += HALF_WIDTH_KATAKANA_PENALTY;
+                    self.prev = LatinCj::Cj;
                 } else if (u >= 0x3041 && u <= 0x3093) || (u >= 0x30A1 && u <= 0x30F6) {
+                    if let Some(pending) = self.pending_score {
+                        score += pending;
+                        self.pending_score = None;
+                    }
                     match u {
                         0x3090 // hiragana wi
                         | 0x3091 // hiragana we
@@ -1058,19 +964,29 @@ impl EucJpCandidate {
                     }
                     self.prev = LatinCj::Cj;
                 } else if (u >= 0x3400 && u < 0xA000) || (u >= 0xF900 && u < 0xFB00) {
-                    if self.prev_prev_byte == 0x8F {
-                        score += EUC_JP_SCORE_PER_OTHER_KANJI;
-                    } else if self.prev_byte < 0xD0 {
-                        score += EUC_JP_SCORE_PER_LEVEL_1_KANJI;
-                        score += cjk_extra_score(u, &data::DETECTOR_DATA.frequent_kanji);
+                    if let Some(pending) = self.pending_score {
+                        score += pending;
+                        self.pending_score = None;
+                    }
+                    if self.prev_prev_byte == self.euc_jp_plane_shift {
+                        score += self.maybe_set_as_pending(EUC_JP_SCORE_PER_OTHER_KANJI);
+                    } else if self.prev_byte < self.level2_start
+                        || (self.prev_byte == self.level2_start && b < self.level1_end)
+                    {
+                        score += self.maybe_set_as_pending(EUC_JP_SCORE_PER_LEVEL_1_KANJI + cjk_extra_score(u, &data::DETECTOR_DATA.frequent_kanji));
                     } else {
-                        score += EUC_JP_SCORE_PER_LEVEL_2_KANJI;
+                        score += self.maybe_set_as_pending(EUC_JP_SCORE_PER_LEVEL_2_KANJI);
                     }
                     if self.prev == LatinCj::AsciiLetter {
                         score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
                     self.prev = LatinCj::Cj;
+                } else if u >= 0xE000 && u < 0xF900 {
+                    self.pending_score = None; // Discard pending score
+                    score += SHIFT_JIS_PUA_PENALTY;
+                    self.prev = LatinCj::Other;
                 } else {
+                    self.pending_score = None; // Discard pending score
                     match u {
                         0x3000 // Distinct from Korean, space
                         | 0x3001 // Distinct from Korean, enumeration comma
@@ -1336,8 +1252,7 @@ enum InnerCandidate {
     Logical(LogicalCandidate),
     Visual(VisualCandidate),
     Utf8(Utf8Candidate),
-    Shift(ShiftJisCandidate),
-    EucJp(EucJpCandidate),
+    Japanese(JapaneseCandidate),
     EucKr(EucKrCandidate),
     Big5(Big5Candidate),
     Gbk(GbkCandidate),
@@ -1443,8 +1358,7 @@ impl InnerCandidate {
                 }
             }
             InnerCandidate::Utf8(c) => c.feed(buffer, last),
-            InnerCandidate::Shift(c) => c.feed(buffer, last),
-            InnerCandidate::EucJp(c) => c.feed(buffer, last),
+            InnerCandidate::Japanese(c) => c.feed(buffer, last),
             InnerCandidate::EucKr(c) => c.feed(buffer, last),
             InnerCandidate::Big5(c) => c.feed(buffer, last),
             InnerCandidate::Gbk(c) => c.feed(buffer, last),
@@ -1521,11 +1435,16 @@ impl Candidate {
 
     fn new_shift_jis() -> Self {
         Candidate {
-            inner: InnerCandidate::Shift(ShiftJisCandidate {
+            inner: InnerCandidate::Japanese(JapaneseCandidate {
                 decoder: SHIFT_JIS.new_decoder_without_bom_handling(),
+                pending_score: None,
                 non_ascii_seen: false,
                 prev: LatinCj::Other,
                 prev_byte: 0,
+                prev_prev_byte: 0,
+                euc_jp_plane_shift: 0xFF,
+                level2_start: 0x98,
+                level1_end: 0x73,
             }),
             score: Some(0),
         }
@@ -1533,12 +1452,16 @@ impl Candidate {
 
     fn new_euc_jp() -> Self {
         Candidate {
-            inner: InnerCandidate::EucJp(EucJpCandidate {
+            inner: InnerCandidate::Japanese(JapaneseCandidate {
                 decoder: EUC_JP.new_decoder_without_bom_handling(),
+                pending_score: None,
                 non_ascii_seen: false,
                 prev: LatinCj::Other,
                 prev_byte: 0,
                 prev_prev_byte: 0,
+                euc_jp_plane_shift: 0x8F,
+                level2_start: 0xD0,
+                level1_end: 0x00,
             }),
             score: Some(0),
         }
@@ -1644,11 +1567,8 @@ impl Candidate {
             InnerCandidate::Visual(c) => {
                 return c.data.encoding;
             }
-            InnerCandidate::Shift(_) => {
-                return SHIFT_JIS;
-            }
-            InnerCandidate::EucJp(_) => {
-                return EUC_JP;
+            InnerCandidate::Japanese(c) => {
+                return c.decoder.encoding();
             }
             InnerCandidate::Big5(_) => {
                 return BIG5;
