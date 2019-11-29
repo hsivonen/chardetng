@@ -1071,7 +1071,7 @@ impl Big5Candidate {
                     match self.prev_byte {
                         0xA4..=0xC6 => {
                             score += BIG5_SCORE_PER_LEVEL_1_HANZI;
-                            score += cjk_extra_score(u, &data::DETECTOR_DATA.frequent_traditional);
+                            // score += cjk_extra_score(u, &data::DETECTOR_DATA.frequent_traditional);
                         }
                         _ => {
                             score += BIG5_SCORE_PER_OTHER_HANZI;
