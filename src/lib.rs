@@ -26,7 +26,10 @@ use encoding_rs::WINDOWS_1257;
 use encoding_rs::WINDOWS_874;
 
 mod data;
+mod tld;
 use data::*;
+use tld::classify_tld;
+use tld::Tld;
 
 const LATIN_ADJACENCY_PENALTY: i64 = -50;
 
@@ -973,7 +976,10 @@ impl JapaneseCandidate {
                     } else if self.prev_byte < self.level2_start
                         || (self.prev_byte == self.level2_start && b < self.level1_end)
                     {
-                        score += self.maybe_set_as_pending(EUC_JP_SCORE_PER_LEVEL_1_KANJI + cjk_extra_score(u, &data::DETECTOR_DATA.frequent_kanji));
+                        score += self.maybe_set_as_pending(
+                            EUC_JP_SCORE_PER_LEVEL_1_KANJI
+                                + cjk_extra_score(u, &data::DETECTOR_DATA.frequent_kanji),
+                        );
                     } else {
                         score += self.maybe_set_as_pending(EUC_JP_SCORE_PER_LEVEL_2_KANJI);
                     }
@@ -1501,7 +1507,7 @@ impl Candidate {
         }
     }
 
-    fn score(&self) -> Option<i64> {
+    fn score(&self, _: Tld) -> Option<i64> {
         match &self.inner {
             InnerCandidate::NonLatinCased(c) => {
                 if c.longest_word < 2 {
@@ -1599,7 +1605,6 @@ fn count_non_ascii(buffer: &[u8]) -> u64 {
 pub struct EncodingDetector {
     candidates: [Candidate; 24],
     non_ascii_seen: u64,
-    fallback: Option<&'static Encoding>,
     last_before_non_ascii: Option<u8>,
     esc_seen: bool,
 }
@@ -1612,7 +1617,7 @@ impl EncodingDetector {
         self.non_ascii_seen += count_non_ascii(buffer);
     }
 
-    fn feed_without_guessing_impl(&mut self, buffer: &[u8], last: bool) {
+    pub fn feed(&mut self, buffer: &[u8], last: bool) -> bool {
         let start = if self.non_ascii_seen == 0 && !self.esc_seen {
             let up_to = Encoding::ascii_valid_up_to(buffer);
             let start = if let Some(escape) = memchr::memchr(0x1B, &buffer[..up_to]) {
@@ -1623,7 +1628,7 @@ impl EncodingDetector {
             };
             if start == buffer.len() && !buffer.is_empty() {
                 self.last_before_non_ascii = Some(buffer[buffer.len() - 1]);
-                return;
+                return self.non_ascii_seen != 0;
             }
             if start == 0 {
                 if let Some(ascii) = self.last_before_non_ascii {
@@ -1638,21 +1643,29 @@ impl EncodingDetector {
             0
         };
         self.feed_impl(&buffer[start..], last);
+        self.non_ascii_seen != 0
     }
 
-    fn guess(&self) -> (&'static Encoding, bool) {
+    pub fn guess(&self, tld: Option<&[u8]>, allow_utf8: bool) -> &'static Encoding {
+        let tld_type = tld.map_or(Tld::Generic, classify_tld);
+
         if self.non_ascii_seen == 0 && self.esc_seen
         // XXX scan for the rest of escape
         {
-            return (ISO_2022_JP, false);
+            return ISO_2022_JP;
         }
 
-        let utf = self.candidates[Self::UTF_8_INDEX].score.is_some() && self.non_ascii_seen > 0;
+        if allow_utf8
+            && self.candidates[Self::UTF_8_INDEX].score.is_some()
+            && self.non_ascii_seen > 0
+        {
+            return UTF_8;
+        }
 
         let mut encoding = WINDOWS_1252;
         let mut max = 0i64;
         for candidate in (&self.candidates[Self::FIRST_NORMAL..]).iter() {
-            if let Some(score) = candidate.score() {
+            if let Some(score) = candidate.score(tld_type) {
                 if score > max {
                     max = score;
                     encoding = candidate.encoding();
@@ -1660,7 +1673,7 @@ impl EncodingDetector {
             }
         }
         let visual = &self.candidates[Self::VISUAL_INDEX];
-        if let Some(visual_score) = visual.score() {
+        if let Some(visual_score) = visual.score(tld_type) {
             if visual_score > max
                 && visual.plausible_punctuation()
                     > self.candidates[Self::LOGICAL_INDEX].plausible_punctuation()
@@ -1670,28 +1683,14 @@ impl EncodingDetector {
             }
         }
 
-        (encoding, utf)
-    }
-
-    pub fn feed_without_guessing(&mut self, buffer: &[u8]) {
-        self.feed_without_guessing_impl(buffer, false);
-    }
-
-    pub fn feed(&mut self, buffer: &[u8], last: bool) -> (&'static Encoding, bool, u64) {
-        self.feed_without_guessing_impl(buffer, last);
-        let (enc, utf) = self.guess();
-        (enc, utf, self.non_ascii_seen)
-    }
-
-    pub fn new() -> Self {
-        EncodingDetector::new_with_fallback(None)
+        encoding
     }
 
     // XXX Test-only API
     pub fn find_score(&self, encoding: &'static Encoding) -> Option<i64> {
         for candidate in self.candidates.iter() {
             if encoding == candidate.encoding() {
-                return candidate.score();
+                return candidate.score(Tld::Generic);
             }
         }
         Some(0)
@@ -1743,7 +1742,7 @@ impl EncodingDetector {
 
     // const ISO_8859_6_SINGLE_BYTE: usize = 21;
 
-    pub fn new_with_fallback(fallback: Option<&'static Encoding>) -> Self {
+    pub fn new() -> Self {
         EncodingDetector {
             candidates: [
                 Candidate::new_utf_8(),                                                // 0
@@ -1772,7 +1771,6 @@ impl EncodingDetector {
                 Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[ISO_8859_5_INDEX]),   // 23
             ],
             non_ascii_seen: 0,
-            fallback: fallback,
             last_before_non_ascii: None,
             esc_seen: false,
         }
@@ -1786,7 +1784,8 @@ mod tests {
     fn check(input: &str, encoding: &'static Encoding) {
         let (bytes, _, _) = encoding.encode(input);
         let mut det = EncodingDetector::new();
-        let (enc, _, _) = det.feed(&bytes, true);
+        det.feed(&bytes, true);
+        let enc = det.guess(None, false);
         let (decoded, _) = enc.decode_without_bom_handling(&bytes);
         println!("{:?}", decoded);
         assert_eq!(enc, encoding);
@@ -1795,10 +1794,10 @@ mod tests {
     #[test]
     fn test_empty() {
         let mut det = EncodingDetector::new();
-        let (enc, utf, non_ascii) = det.feed(b"", true);
+        let seen_non_ascii = det.feed(b"", true);
+        let enc = det.guess(None, true);
         assert_eq!(enc, WINDOWS_1252);
-        assert!(!utf);
-        assert_eq!(non_ascii, 0);
+        assert!(!seen_non_ascii);
     }
 
     #[test]
@@ -1826,10 +1825,10 @@ mod tests {
         check("\u{5E2}\u{5D1}\u{5E8}\u{5D9}\u{5EA}", WINDOWS_1255);
     }
 
-    #[test]
-    fn test_th() {
-        check("ไทย", WINDOWS_874);
-    }
+    // #[test]
+    // fn test_th() {
+    //     check("ไทย", WINDOWS_874);
+    // }
 
     #[test]
     fn test_foo() {
