@@ -741,9 +741,20 @@ struct GbkCandidate {
     decoder: Decoder,
     prev_byte: u8,
     prev: LatinCj,
+    pending_score: Option<i64>,
 }
 
 impl GbkCandidate {
+    fn maybe_set_as_pending(&mut self, s: i64) -> i64 {
+        assert!(self.pending_score.is_none());
+        if self.prev == LatinCj::Cj || !more_problematic_lead(self.prev_byte) {
+            s
+        } else {
+            self.pending_score = Some(s);
+            0
+        }
+    }
+
     fn feed(&mut self, buffer: &[u8], last: bool) -> Option<i64> {
         let mut score = 0i64;
         let mut src = [0u8];
@@ -758,11 +769,16 @@ impl GbkCandidate {
                 if (u >= u16::from(b'a') && u <= u16::from(b'z'))
                     || (u >= u16::from(b'A') && u <= u16::from(b'Z'))
                 {
+                    self.pending_score = None; // Discard pending score
                     if self.prev == LatinCj::Cj {
                         score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
                     self.prev = LatinCj::AsciiLetter;
                 } else if u >= 0x4E00 && u <= 0x9FA5 {
+                    if let Some(pending) = self.pending_score {
+                        score += pending;
+                        self.pending_score = None;
+                    }
                     if b >= 0xA1 && b <= 0xFE {
                         match self.prev_byte {
                             0xA1..=0xD7 => {
@@ -776,18 +792,27 @@ impl GbkCandidate {
                             }
                         }
                     } else {
-                        score += GBK_SCORE_PER_NON_EUC;
+                        score += self.maybe_set_as_pending(GBK_SCORE_PER_NON_EUC);
                     }
                     if self.prev == LatinCj::AsciiLetter {
                         score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
                     self.prev = LatinCj::Cj;
                 } else if (u >= 0x3400 && u < 0xA000) || (u >= 0xF900 && u < 0xFB00) {
+                    if let Some(pending) = self.pending_score {
+                        score += pending;
+                        self.pending_score = None;
+                    }
+                    // XXX score?
                     if self.prev == LatinCj::AsciiLetter {
                         score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
                     self.prev = LatinCj::Cj;
                 } else if u >= 0xE000 && u < 0xF900 {
+                    if let Some(pending) = self.pending_score {
+                        score += pending;
+                        self.pending_score = None;
+                    }
                     // Treat the GB18030-required PUA mappings as non-EUC ideographs.
                     match u {
                         0xE78D..=0xE796
@@ -826,16 +851,30 @@ impl GbkCandidate {
                         | 0xFF1B // Distinct from Japanese, semicolon
                         | 0xFF1F // Distinct from Japanese, question
                         => {
+                            if let Some(pending) = self.pending_score {
+                                score += pending;
+                                self.pending_score = None;
+                            }
                             score += CJ_PUNCTUATION;
                         }
-                        0..=0x7F => {}
+                        0..=0x7F => {
+                            self.pending_score = None; // Discard pending score
+                        }
                         _ => {
+                            if let Some(pending) = self.pending_score {
+                                score += pending;
+                                self.pending_score = None;
+                            }
                             score += CJK_OTHER;
                         }
                     }
                     self.prev = LatinCj::Other;
                 }
             } else if written == 2 {
+                if let Some(pending) = self.pending_score {
+                    score += pending;
+                    self.pending_score = None;
+                }
                 let u = dst[0];
                 if u >= 0xDB80 && u <= 0xDBFF {
                     score += GBK_PUA_PENALTY;
@@ -882,8 +921,17 @@ impl GbkCandidate {
     }
 }
 
+// Shift_JIS and Big5
 fn problematic_lead(b: u8) -> bool {
-    b == 0x92
+    match b {
+        0x91..=0x97 | 0x9B | 0x8B => true,
+        _ => false,
+    }
+}
+
+// GBK and EUC-KR
+fn more_problematic_lead(b: u8) -> bool {
+    problematic_lead(b) || b == 0x82 || b == 0x84 || b == 0x85
 }
 
 struct ShiftJisCandidate {
@@ -962,11 +1010,13 @@ impl ShiftJisCandidate {
                     }
                     self.prev = LatinCj::Cj;
                 } else if u >= 0xE000 && u < 0xF900 {
-                    self.pending_score = None; // Discard pending score
+                    if let Some(pending) = self.pending_score {
+                        score += pending;
+                        self.pending_score = None;
+                    }
                     score += SHIFT_JIS_PUA_PENALTY;
                     self.prev = LatinCj::Other;
                 } else {
-                    self.pending_score = None; // Discard pending score
                     match u {
                         0x3000 // Distinct from Korean, space
                         | 0x3001 // Distinct from Korean, enumeration comma
@@ -974,13 +1024,23 @@ impl ShiftJisCandidate {
                         | 0xFF08 // Distinct from Korean, parenthesis
                         | 0xFF09 // Distinct from Korean, parenthesis
                         => {
+                            if let Some(pending) = self.pending_score {
+                                score += pending;
+                                self.pending_score = None;
+                            }
                             // Not really needed for CJK distinction
                             // but let's give non-zero score for these
                             // common byte pairs anyway.
                             score += CJ_PUNCTUATION;
                         }
-                        0..=0x7F => {}
+                        0..=0x7F => {
+                            self.pending_score = None; // Discard pending score
+                        }
                         _ => {
+                            if let Some(pending) = self.pending_score {
+                                score += pending;
+                                self.pending_score = None;
+                            }
                             score += CJK_OTHER;
                         }
                     }
@@ -1144,9 +1204,20 @@ struct Big5Candidate {
     decoder: Decoder,
     prev: LatinCj,
     prev_byte: u8,
+    pending_score: Option<i64>,
 }
 
 impl Big5Candidate {
+    fn maybe_set_as_pending(&mut self, s: i64) -> i64 {
+        assert!(self.pending_score.is_none());
+        if self.prev == LatinCj::Cj || !problematic_lead(self.prev_byte) {
+            s
+        } else {
+            self.pending_score = Some(s);
+            0
+        }
+    }
+
     fn feed(&mut self, buffer: &[u8], last: bool) -> Option<i64> {
         let mut score = 0i64;
         let mut src = [0u8];
@@ -1161,18 +1232,23 @@ impl Big5Candidate {
                 if (u >= u16::from(b'a') && u <= u16::from(b'z'))
                     || (u >= u16::from(b'A') && u <= u16::from(b'Z'))
                 {
+                    self.pending_score = None; // Discard pending score
                     if self.prev == LatinCj::Cj {
                         score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
                     self.prev = LatinCj::AsciiLetter;
                 } else if (u >= 0x3400 && u < 0xA000) || (u >= 0xF900 && u < 0xFB00) {
+                    if let Some(pending) = self.pending_score {
+                        score += pending;
+                        self.pending_score = None;
+                    }
                     match self.prev_byte {
                         0xA4..=0xC6 => {
-                            score += BIG5_SCORE_PER_LEVEL_1_HANZI;
+                            score += self.maybe_set_as_pending(BIG5_SCORE_PER_LEVEL_1_HANZI);
                             // score += cjk_extra_score(u, &data::DETECTOR_DATA.frequent_traditional);
                         }
                         _ => {
-                            score += BIG5_SCORE_PER_OTHER_HANZI;
+                            score += self.maybe_set_as_pending(BIG5_SCORE_PER_OTHER_HANZI);
                         }
                     }
                     if self.prev == LatinCj::AsciiLetter {
@@ -1191,25 +1267,39 @@ impl Big5Candidate {
                         | 0xFF1B // Distinct from Japanese, semicolon
                         | 0xFF1F // Distinct from Japanese, question
                         => {
+                            if let Some(pending) = self.pending_score {
+                                score += pending;
+                                self.pending_score = None;
+                            }
                             // Not really needed for CJK distinction
                             // but let's give non-zero score for these
                             // common byte pairs anyway.
                             score += CJ_PUNCTUATION;
                         }
-                        0..=0x7F => {}
+                        0..=0x7F => {
+                            self.pending_score = None; // Discard pending score
+                        }
                         _ => {
+                            if let Some(pending) = self.pending_score {
+                                score += pending;
+                                self.pending_score = None;
+                            }
                             score += CJK_OTHER;
                         }
                     }
                     self.prev = LatinCj::Other;
                 }
             } else if written == 2 {
+                if let Some(pending) = self.pending_score {
+                    score += pending;
+                    self.pending_score = None;
+                }
                 if dst[0] == 0xCA || dst[0] == 0xEA {
                     score += CJK_OTHER;
                     self.prev = LatinCj::Other;
                 } else {
-                    assert!(dst[0] >= 0xD480 && dst[0] < 0xD880);
-                    score += BIG5_SCORE_PER_OTHER_HANZI;
+                    debug_assert!(dst[0] >= 0xD480 && dst[0] < 0xD880);
+                    score += self.maybe_set_as_pending(BIG5_SCORE_PER_OTHER_HANZI);
                     if self.prev == LatinCj::AsciiLetter {
                         score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
@@ -1249,12 +1339,24 @@ impl Big5Candidate {
 
 struct EucKrCandidate {
     decoder: Decoder,
+    prev_byte: u8,
     prev_was_euc_range: bool,
     prev: LatinKorean,
     current_word_len: u64,
+    pending_score: Option<i64>,
 }
 
 impl EucKrCandidate {
+    fn maybe_set_as_pending(&mut self, s: i64) -> i64 {
+        assert!(self.pending_score.is_none());
+        if self.prev == LatinKorean::Hangul || !more_problematic_lead(self.prev_byte) {
+            s
+        } else {
+            self.pending_score = Some(s);
+            0
+        }
+    }
+
     fn feed(&mut self, buffer: &[u8], last: bool) -> Option<i64> {
         let mut score = 0i64;
         let mut src = [0u8];
@@ -1270,6 +1372,7 @@ impl EucKrCandidate {
                 if (u >= u16::from(b'a') && u <= u16::from(b'z'))
                     || (u >= u16::from(b'A') && u <= u16::from(b'Z'))
                 {
+                    self.pending_score = None; // Discard pending score
                     match self.prev {
                         LatinKorean::Hangul | LatinKorean::Hanja => {
                             score += CJK_LATIN_ADJACENCY_PENALTY;
@@ -1279,11 +1382,15 @@ impl EucKrCandidate {
                     self.prev = LatinKorean::AsciiLetter;
                     self.current_word_len = 0;
                 } else if u >= 0xAC00 && u <= 0xD7A3 {
+                    if let Some(pending) = self.pending_score {
+                        score += pending;
+                        self.pending_score = None;
+                    }
                     if self.prev_was_euc_range && in_euc_range {
                         score += EUC_KR_SCORE_PER_EUC_HANGUL;
                         score += cjk_extra_score(u, &data::DETECTOR_DATA.frequent_hangul);
                     } else {
-                        score += EUC_KR_SCORE_PER_NON_EUC_HANGUL;
+                        score += self.maybe_set_as_pending(EUC_KR_SCORE_PER_NON_EUC_HANGUL);
                     }
                     if self.prev == LatinKorean::AsciiLetter {
                         score += CJK_LATIN_ADJACENCY_PENALTY;
@@ -1294,6 +1401,10 @@ impl EucKrCandidate {
                         score += EUC_KR_LONG_WORD_PENALTY;
                     }
                 } else if (u >= 0x4E00 && u < 0xAC00) || (u >= 0xF900 && u <= 0xFA0B) {
+                    if let Some(pending) = self.pending_score {
+                        score += pending;
+                        self.pending_score = None;
+                    }
                     score += EUC_KR_SCORE_PER_HANJA;
                     match self.prev {
                         LatinKorean::AsciiLetter => {
@@ -1311,7 +1422,13 @@ impl EucKrCandidate {
                     }
                 } else {
                     if u >= 0x80 {
+                        if let Some(pending) = self.pending_score {
+                            score += pending;
+                            self.pending_score = None;
+                        }
                         score += CJK_OTHER;
+                    } else {
+                        self.pending_score = None; // Discard pending score
                     }
                     self.prev = LatinKorean::Other;
                     self.current_word_len = 0;
@@ -1329,6 +1446,7 @@ impl EucKrCandidate {
                 }
             }
             self.prev_was_euc_range = in_euc_range;
+            self.prev_byte = b;
         }
         if last {
             let (result, _, _) = self
@@ -1569,9 +1687,11 @@ impl Candidate {
         Candidate {
             inner: InnerCandidate::EucKr(EucKrCandidate {
                 decoder: EUC_KR.new_decoder_without_bom_handling(),
+                prev_byte: 0,
                 prev_was_euc_range: false,
                 prev: LatinKorean::Other,
                 current_word_len: 0,
+                pending_score: None,
             }),
             score: Some(0),
         }
@@ -1583,6 +1703,7 @@ impl Candidate {
                 decoder: BIG5.new_decoder_without_bom_handling(),
                 prev: LatinCj::Other,
                 prev_byte: 0,
+                pending_score: None,
             }),
             score: Some(0),
         }
@@ -1594,6 +1715,7 @@ impl Candidate {
                 decoder: GBK.new_decoder_without_bom_handling(),
                 prev: LatinCj::Other,
                 prev_byte: 0,
+                pending_score: None,
             }),
             score: Some(0),
         }
