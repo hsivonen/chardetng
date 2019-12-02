@@ -1603,7 +1603,7 @@ fn count_non_ascii(buffer: &[u8]) -> u64 {
 }
 
 pub struct EncodingDetector {
-    candidates: [Candidate; 24],
+    candidates: [Candidate; 26],
     non_ascii_seen: u64,
     last_before_non_ascii: Option<u8>,
     esc_seen: bool,
@@ -1714,7 +1714,7 @@ impl EncodingDetector {
 
     const VISUAL_INDEX: usize = 1;
 
-    const LOGICAL_INDEX: usize = 14;
+    const LOGICAL_INDEX: usize = 15;
 
     // const WINDOWS_1250_SINGLE_BYTE: usize = 10;
 
@@ -1757,18 +1757,20 @@ impl EncodingDetector {
                 Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1250_INDEX]),           // 9
                 Candidate::new_latin(&SINGLE_BYTE_DATA[ISO_8859_2_INDEX]),             // 10
                 Candidate::new_arabic_french(&SINGLE_BYTE_DATA[WINDOWS_1256_INDEX]),   // 11
-                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1254_INDEX]),           // 12
-                Candidate::new_caseless(&SINGLE_BYTE_DATA[WINDOWS_874_INDEX]),         // 13
-                Candidate::new_logical(&SINGLE_BYTE_DATA[WINDOWS_1255_INDEX]),         // 14
-                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[WINDOWS_1253_INDEX]), // 15
-                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[ISO_8859_7_INDEX]),   // 16
-                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1257_INDEX]),           // 17
-                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[KOI8_U_INDEX]),       // 18
-                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[IBM866_INDEX]),       // 19
-                Candidate::new_caseless(&SINGLE_BYTE_DATA[ISO_8859_6_INDEX]),          // 20
-                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1258_INDEX]),           // 21
-                Candidate::new_latin(&SINGLE_BYTE_DATA[ISO_8859_4_INDEX]),             // 22
-                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[ISO_8859_5_INDEX]),   // 23
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1252_ICELANDIC_INDEX]), // 12
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1254_INDEX]),           // 13
+                Candidate::new_caseless(&SINGLE_BYTE_DATA[WINDOWS_874_INDEX]),         // 14
+                Candidate::new_logical(&SINGLE_BYTE_DATA[WINDOWS_1255_INDEX]),         // 15
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[WINDOWS_1253_INDEX]), // 16
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[ISO_8859_7_INDEX]),   // 17
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1257_INDEX]),           // 18
+                Candidate::new_latin(&SINGLE_BYTE_DATA[ISO_8859_13_INDEX]),            // 19
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[KOI8_U_INDEX]),       // 20
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[IBM866_INDEX]),       // 21
+                Candidate::new_caseless(&SINGLE_BYTE_DATA[ISO_8859_6_INDEX]),          // 22
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1258_INDEX]),           // 23
+                Candidate::new_latin(&SINGLE_BYTE_DATA[ISO_8859_4_INDEX]),             // 24
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[ISO_8859_5_INDEX]),   // 25
             ],
             non_ascii_seen: 0,
             last_before_non_ascii: None,
