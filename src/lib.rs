@@ -110,6 +110,18 @@ const LATIN_LETTER: u8 = 2;
 /// ASCII punctionation caseless class for Hebrew
 const ASCII_PUNCTUATION: u8 = 3;
 
+fn contains_upper_case_or_non_ascii(label: &[u8]) -> bool {
+    for &b in label.into_iter() {
+        if b >= 0x80 {
+            return true;
+        }
+        if b >= b'A' && b <= b'Z' {
+            return true;
+        }
+    }
+    false
+}
+
 // For Latin, we only penalize pairwise bad transitions
 // if one participant is non-ASCII. This avoids violating
 // the principle that ASCII pairs never contribute to the
@@ -130,10 +142,6 @@ enum NonLatinCaseState {
     Upper,
     Lower,
     UpperLower,
-    LowerUpper,
-    LowerUpperUpper,
-    LowerUpperLower,
-    UpperLowerCamel, // State like UpperLower but has been through something else
     AllCaps,
     Mix,
 }
@@ -183,9 +191,7 @@ impl NonLatinCasedCandidate {
             //   unfortunately is possible due to KOI8-U).
             // * Giving a small per-word penalty to all-uppercase KOI8-U (to favor
             //   all-lowercase Greek over all-caps KOI8-U).
-            // * Giving large penalties for random mixed-case while making the
-            //   penalties for CamelCase recoverable. Going easy on CamelCase
-            //   might not actually be necessary.
+            // * Giving large penalties for random mixed-case.
 
             // ASCII doesn't participate in non-Latin casing.
             if caseless_class == LATIN_LETTER {
@@ -200,19 +206,10 @@ impl NonLatinCasedCandidate {
                 match self.case_state {
                     NonLatinCaseState::Space
                     | NonLatinCaseState::Upper
-                    | NonLatinCaseState::Lower
-                    | NonLatinCaseState::UpperLowerCamel => {}
+                    | NonLatinCaseState::Lower => {}
                     NonLatinCaseState::UpperLower => {
                         // Intentionally applied only once per word.
                         score += NON_LATIN_CAPITALIZATION_BONUS;
-                    }
-                    NonLatinCaseState::LowerUpper => {
-                        // Once per word
-                        score += NON_LATIN_IMPLAUSIBLE_CASE_TRANSITION_PENALTY;
-                    }
-                    NonLatinCaseState::LowerUpperLower => {
-                        // Once per word
-                        score += NON_LATIN_CAMEL_PENALTY;
                     }
                     NonLatinCaseState::AllCaps => {
                         // Intentionally applied only once per word.
@@ -221,9 +218,9 @@ impl NonLatinCasedCandidate {
                             score += NON_LATIN_ALL_CAPS_PENALTY;
                         }
                     }
-                    NonLatinCaseState::Mix | NonLatinCaseState::LowerUpperUpper => {
+                    NonLatinCaseState::Mix => {
                         // Per letter
-                        score += NON_LATIN_MIXED_CASE_PENALTY;
+                        score += NON_LATIN_MIXED_CASE_PENALTY * (self.current_word_len as i64);
                     }
                 }
                 self.case_state = NonLatinCaseState::Space;
@@ -238,25 +235,9 @@ impl NonLatinCasedCandidate {
                     }
                     NonLatinCaseState::Lower
                     | NonLatinCaseState::UpperLower
-                    | NonLatinCaseState::UpperLowerCamel => {}
-                    NonLatinCaseState::LowerUpper => {
-                        score += NON_LATIN_CAMEL_PENALTY;
-                        self.case_state = NonLatinCaseState::LowerUpperLower;
-                    }
-                    NonLatinCaseState::LowerUpperUpper => {
-                        score += NON_LATIN_MIXED_CASE_PENALTY;
-                        self.case_state = NonLatinCaseState::Mix;
-                    }
-                    NonLatinCaseState::LowerUpperLower => {
-                        score += NON_LATIN_CAMEL_PENALTY;
-                        self.case_state = NonLatinCaseState::UpperLowerCamel;
-                    }
+                    | NonLatinCaseState::Mix => {}
                     NonLatinCaseState::AllCaps => {
-                        score += NON_LATIN_IMPLAUSIBLE_CASE_TRANSITION_PENALTY;
                         self.case_state = NonLatinCaseState::Mix;
-                    }
-                    NonLatinCaseState::Mix => {
-                        score += NON_LATIN_MIXED_CASE_PENALTY;
                     }
                 }
             } else {
@@ -268,25 +249,10 @@ impl NonLatinCasedCandidate {
                     NonLatinCaseState::Upper => {
                         self.case_state = NonLatinCaseState::AllCaps;
                     }
-                    NonLatinCaseState::Lower
-                    | NonLatinCaseState::UpperLower
-                    | NonLatinCaseState::UpperLowerCamel => {
-                        // No penalty, yet. The next transition decides how much.
-                        self.case_state = NonLatinCaseState::LowerUpper;
-                    }
-                    NonLatinCaseState::LowerUpper => {
-                        // Once per word
-                        score += NON_LATIN_IMPLAUSIBLE_CASE_TRANSITION_PENALTY;
-                        self.case_state = NonLatinCaseState::LowerUpperUpper;
-                    }
-                    NonLatinCaseState::LowerUpperUpper | NonLatinCaseState::Mix => {
-                        score += NON_LATIN_MIXED_CASE_PENALTY;
-                    }
-                    NonLatinCaseState::LowerUpperLower => {
-                        score += NON_LATIN_IMPLAUSIBLE_CASE_TRANSITION_PENALTY;
+                    NonLatinCaseState::Lower | NonLatinCaseState::UpperLower => {
                         self.case_state = NonLatinCaseState::Mix;
                     }
-                    NonLatinCaseState::AllCaps => {}
+                    NonLatinCaseState::AllCaps | NonLatinCaseState::Mix => {}
                 }
             }
 
@@ -1863,8 +1829,14 @@ impl EncodingDetector {
         self.non_ascii_seen != 0
     }
 
+    /// # Panics
+    ///
+    /// If `tld` contains non-ASCII or upper-case letters.
     pub fn guess(&self, tld: Option<&[u8]>, allow_utf8: bool) -> &'static Encoding {
-        let tld_type = tld.map_or(Tld::Generic, classify_tld);
+        let tld_type = tld.map_or(Tld::Generic, |tld| {
+            assert!(!contains_upper_case_or_non_ascii(tld));
+            classify_tld(tld)
+        });
 
         if self.non_ascii_seen == 0 && self.esc_seen
         // XXX scan for the rest of escape
