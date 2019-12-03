@@ -674,6 +674,36 @@ impl Utf8Candidate {
     }
 }
 
+struct Iso2022Candidate {
+    decoder: Decoder,
+}
+
+impl Iso2022Candidate {
+    fn feed(&mut self, buffer: &[u8], last: bool) -> Option<i64> {
+        let mut dst = [0u16; 1024];
+        let mut total_read = 0;
+        loop {
+            let (result, read, _) = self.decoder.decode_to_utf16_without_replacement(
+                &buffer[total_read..],
+                &mut dst,
+                last,
+            );
+            total_read += read;
+            match result {
+                DecoderResult::InputEmpty => {
+                    return Some(0);
+                }
+                DecoderResult::Malformed(_, _) => {
+                    return None;
+                }
+                DecoderResult::OutputFull => {
+                    continue;
+                }
+            }
+        }
+    }
+}
+
 #[derive(PartialEq)]
 enum LatinCj {
     AsciiLetter,
@@ -1434,6 +1464,7 @@ enum InnerCandidate {
     Logical(LogicalCandidate),
     Visual(VisualCandidate),
     Utf8(Utf8Candidate),
+    Iso2022(Iso2022Candidate),
     Shift(ShiftJisCandidate),
     EucJp(EucJpCandidate),
     EucKr(EucKrCandidate),
@@ -1541,6 +1572,7 @@ impl InnerCandidate {
                 }
             }
             InnerCandidate::Utf8(c) => c.feed(buffer, last),
+            InnerCandidate::Iso2022(c) => c.feed(buffer, last),
             InnerCandidate::Shift(c) => c.feed(buffer, last),
             InnerCandidate::EucJp(c) => c.feed(buffer, last),
             InnerCandidate::EucKr(c) => c.feed(buffer, last),
@@ -1612,6 +1644,15 @@ impl Candidate {
         Candidate {
             inner: InnerCandidate::Utf8(Utf8Candidate {
                 decoder: UTF_8.new_decoder_without_bom_handling(),
+            }),
+            score: Some(0),
+        }
+    }
+
+    fn new_iso_2022_jp() -> Self {
+        Candidate {
+            inner: InnerCandidate::Iso2022(Iso2022Candidate {
+                decoder: ISO_2022_JP.new_decoder_without_bom_handling(),
             }),
             score: Some(0),
         }
@@ -1765,6 +1806,9 @@ impl Candidate {
             InnerCandidate::Utf8(_) => {
                 return UTF_8;
             }
+            InnerCandidate::Iso2022(_) => {
+                return ISO_2022_JP;
+            }
         }
     }
 }
@@ -1780,7 +1824,7 @@ fn count_non_ascii(buffer: &[u8]) -> u64 {
 }
 
 pub struct EncodingDetector {
-    candidates: [Candidate; 26],
+    candidates: [Candidate; 27],
     non_ascii_seen: u64,
     last_before_non_ascii: Option<u8>,
     esc_seen: bool,
@@ -1832,8 +1876,9 @@ impl EncodingDetector {
             classify_tld(tld)
         });
 
-        if self.non_ascii_seen == 0 && self.esc_seen
-        // XXX scan for the rest of escape
+        if self.non_ascii_seen == 0
+            && self.esc_seen
+            && self.candidates[Self::ISO_2022_JP_INDEX].score.is_some()
         {
             return ISO_2022_JP;
         }
@@ -1881,79 +1926,44 @@ impl EncodingDetector {
 
     const UTF_8_INDEX: usize = 0;
 
-    // const SHIFT_JIS_INDEX: usize = 2;
+    const ISO_2022_JP_INDEX: usize = 1;
 
-    // const EUC_JP_INDEX: usize = 3;
+    const FIRST_NORMAL: usize = 3;
 
-    // const EUC_KR_INDEX: usize = 4;
+    const VISUAL_INDEX: usize = 2;
 
-    // const BIG5_INDEX: usize = 5;
-
-    // const GBK_INDEX: usize = 6;
-
-    // const FIRST_SINGLE_BYTE: usize = 7;
-
-    const FIRST_NORMAL: usize = 2;
-
-    const VISUAL_INDEX: usize = 1;
-
-    const LOGICAL_INDEX: usize = 15;
-
-    // const WINDOWS_1250_SINGLE_BYTE: usize = 10;
-
-    // const WINDOWS_1251_SINGLE_BYTE: usize = 9;
-
-    // const WINDOWS_1252_SINGLE_BYTE: usize = 8;
-
-    // const WINDOWS_1253_SINGLE_BYTE: usize = 16;
-
-    // const WINDOWS_1254_SINGLE_BYTE: usize = 13;
-
-    // const WINDOWS_1255_SINGLE_BYTE: usize = 15;
-
-    // const WINDOWS_1256_SINGLE_BYTE: usize = 12;
-
-    // const WINDOWS_1257_SINGLE_BYTE: usize = 18;
-
-    // const WINDOWS_1258_SINGLE_BYTE: usize = 22;
-
-    // const ISO_8859_3_SINGLE_BYTE: usize = 11;
-
-    // const ISO_8859_4_SINGLE_BYTE: usize = 23;
-
-    // const ISO_8859_5_SINGLE_BYTE: usize = 24;
-
-    // const ISO_8859_6_SINGLE_BYTE: usize = 21;
+    const LOGICAL_INDEX: usize = 16;
 
     pub fn new() -> Self {
         EncodingDetector {
             candidates: [
                 Candidate::new_utf_8(),                                                // 0
-                Candidate::new_visual(&SINGLE_BYTE_DATA[ISO_8859_8_INDEX]),            // 1
-                Candidate::new_gbk(),                                                  // 2
-                Candidate::new_euc_jp(),                                               // 3
-                Candidate::new_euc_kr(),                                               // 4
-                Candidate::new_shift_jis(),                                            // 5
-                Candidate::new_big5(),                                                 // 6
-                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1252_INDEX]),           // 7
-                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[WINDOWS_1251_INDEX]), // 8
-                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1250_INDEX]),           // 9
-                Candidate::new_latin(&SINGLE_BYTE_DATA[ISO_8859_2_INDEX]),             // 10
-                Candidate::new_arabic_french(&SINGLE_BYTE_DATA[WINDOWS_1256_INDEX]),   // 11
-                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1252_ICELANDIC_INDEX]), // 12
-                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1254_INDEX]),           // 13
-                Candidate::new_caseless(&SINGLE_BYTE_DATA[WINDOWS_874_INDEX]),         // 14
-                Candidate::new_logical(&SINGLE_BYTE_DATA[WINDOWS_1255_INDEX]),         // 15
-                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[WINDOWS_1253_INDEX]), // 16
-                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[ISO_8859_7_INDEX]),   // 17
-                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1257_INDEX]),           // 18
-                Candidate::new_latin(&SINGLE_BYTE_DATA[ISO_8859_13_INDEX]),            // 19
-                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[KOI8_U_INDEX]),       // 20
-                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[IBM866_INDEX]),       // 21
-                Candidate::new_caseless(&SINGLE_BYTE_DATA[ISO_8859_6_INDEX]),          // 22
-                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1258_INDEX]),           // 23
-                Candidate::new_latin(&SINGLE_BYTE_DATA[ISO_8859_4_INDEX]),             // 24
-                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[ISO_8859_5_INDEX]),   // 25
+                Candidate::new_iso_2022_jp(),                                          // 1
+                Candidate::new_visual(&SINGLE_BYTE_DATA[ISO_8859_8_INDEX]),            // 2
+                Candidate::new_gbk(),                                                  // 3
+                Candidate::new_euc_jp(),                                               // 4
+                Candidate::new_euc_kr(),                                               // 5
+                Candidate::new_shift_jis(),                                            // 6
+                Candidate::new_big5(),                                                 // 7
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1252_INDEX]),           // 8
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[WINDOWS_1251_INDEX]), // 9
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1250_INDEX]),           // 10
+                Candidate::new_latin(&SINGLE_BYTE_DATA[ISO_8859_2_INDEX]),             // 11
+                Candidate::new_arabic_french(&SINGLE_BYTE_DATA[WINDOWS_1256_INDEX]),   // 12
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1252_ICELANDIC_INDEX]), // 13
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1254_INDEX]),           // 14
+                Candidate::new_caseless(&SINGLE_BYTE_DATA[WINDOWS_874_INDEX]),         // 15
+                Candidate::new_logical(&SINGLE_BYTE_DATA[WINDOWS_1255_INDEX]),         // 16
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[WINDOWS_1253_INDEX]), // 17
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[ISO_8859_7_INDEX]),   // 18
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1257_INDEX]),           // 19
+                Candidate::new_latin(&SINGLE_BYTE_DATA[ISO_8859_13_INDEX]),            // 20
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[KOI8_U_INDEX]),       // 21
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[IBM866_INDEX]),       // 22
+                Candidate::new_caseless(&SINGLE_BYTE_DATA[ISO_8859_6_INDEX]),          // 23
+                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1258_INDEX]),           // 24
+                Candidate::new_latin(&SINGLE_BYTE_DATA[ISO_8859_4_INDEX]),             // 25
+                Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[ISO_8859_5_INDEX]),   // 26
             ],
             non_ascii_seen: 0,
             last_before_non_ascii: None,
@@ -2008,6 +2018,11 @@ mod tests {
     #[test]
     fn test_he() {
         check("\u{5E2}\u{5D1}\u{5E8}\u{5D9}\u{5EA}", WINDOWS_1255);
+    }
+
+    #[test]
+    fn test_2022() {
+        check("日本語", ISO_2022_JP);
     }
 
     // #[test]
