@@ -16,35 +16,89 @@ Please see the file named
 Generated [API documentation](https://docs.rs/chardetng/) is available
 online.
 
+## Purpose
+
+The purpose of this detector is user retention for Firefox by ensuring that the long tail of the legacy Web is not more convenient to use in Chrome than in Firefox. (Chrome deployed [ced](https://github.com/google/compact_enc_det/), which left Firefox less convenient to use until the deployment of this detector.)
+
 ## Principle of Operation
 
 In general `chardetng` prefers to do negative matching (rule out possibilities from the set of plausible encodings) than to do positive matching. Since negative matching is insufficient, there is positive matching, too.
 
-* UTF-16BE and UTF-16LE are not possible outcomes: Detecting them belongs to the BOM layer.
-* Latin single-byte encodings that have never been the default fallback in any locale configuration for any major browser are not possible outcomes.
-* x-user-defined is for XHR and is not a possible outcome.
-* x-mac-cyrillic is not possible outcome due to IE and Chrome not detecting it.
-* KOI8-R is not a possible outcome due to it differing from KOI8-U only in box drawing, so guessing the KOI8 family always as KOI8-U is safer for the purpose of making sure that text is readable.
-* ISO-2022-JP is matched if there is at least one ISO-2022-JP escape sequence and the stream as a whole is valid ISO-2022-JP (this implies no non-ASCII bytes).
-* UTF-8 match is returned only as a secondary bit of information (to avoid non-interactive use of this information and Web developers depending on things appearing to work without having to take a UI action). UTF-8 is matched if the stream as a whole is valid UTF-8 and has non-ASCII bytes.
-* A single encoding error disqualifies an encoding from possible outcomes. (Notably, as the length of the input increases, it becomes increasingly improbable for the input to be valid according to a legacy CJK encoding without being intended as such.)
+* Except for ISO-2022-JP, pairs of ASCII bytes never contribute to the detection, which has the effect of ignoring HTML syntax without an HTML-aware state machine.
+* A single encoding error disqualifies an encoding from the set of possible outcomes. Notably, as the length of the input increases, it becomes increasingly improbable for the input to be valid according to a legacy CJK encoding without being intended as such. Also, there are single-byte encodings that have unmapped bytes in areas that are in active use by other encodings, so such bytes narrow the set of possibilities very effectively.
 * A single occurrence of a C1 control character disqualifies an encoding from possible outcomes.
 * The first non-ASCII character being a half-width katakana character disqualifies an encoding. (This is _very_ effective for deciding between Shift_JIS and EUC-JP.)
-* Having lots of characters whose bytes don't fit the original EUC rectangle is taken as an indication of Big5 relative to the EUC family.
-* Having kana is taken as an indication of EUC-JP realative to the other EUC-family encodings.
-* Staying within the modern Hangul area is taken as an indication of EUC-KR relative to the other EUC-family encodings.
-* For encodings for bicameral scripts, having an upper-case letter follow a lower-case letter is penalized. (This is effective for deciding that something is not Greek or Cyrillic and also may have some residual benefit with characters in Latin encodings that are not in the obvious upper-case/lower-case byte locations.)
-* For Latin encodings, having three non-ASCII letters in a row is penalized a little and having four or more is penalized a lot.
-* For non-Latin encodings, having a non-Latin letter right next to a Latin letter is penalized.
-* For single-byte encodings, having a character pair (excluding pairs where both characters are ASCII) that never occurs in the Wikipedias for the applicable languages is heavily penalized.
 * For single-byte encodings, character pairs are given scores according to their relative frequencies in the applicable Wikipedias.
-* For Arabic encodings, characters pairs where one character is alif are given an artificially lower score to avoid misdetecting pretty much everything as Arabic. (Pairs that have an alif in Arabic have an unusual relative frequency compared to letter pairs in other scripts.)
-* Non-Latin single-byte encodings need to have at least one three-non-ASCII-letter word to qualify. (Otherwise, non-ASCII punctuation in short Latin inputs gets misdetected as non-Latin.)
+* There's a variety of smaller penalty rules, such as:
+   - For encodings for bicameral scripts, having an upper-case letter follow a lower-case letter is penalized.
+   - For Latin encodings, having three non-ASCII letters in a row is penalized a little and having four or more is penalized a lot.
+   - For non-Latin encodings, having a non-Latin letter right next to a Latin letter is penalized.
+   - For single-byte encodings, having a character pair (excluding pairs where both characters are ASCII) that never occurs in the Wikipedias for the applicable languages is heavily penalized.
 
-* Ordinal indicators and digits
-* Superscript number
-* Inverted punctuation
-* œæ
+## Notes About Encodings
+
+<dl>
+<dt>UTF-8</dt>
+<dd>Detected only if explicitly permitted by the argument to the `guess` method. It's harmful for Web browsers to detect UTF-8 without requiring user action, such as choosing a menu item, because Web developers would start relying on the detection.</dd>
+<dt>UTF-16[BE|LE]</dt>
+<dd>Not detected: Detecting these belongs on the BOM layer.</dd>
+<dt>x-user-defined</dt>
+<dd>Not detected: This encoding is for XHR. `<meta charset=x-user-defined> in HTML is not unlabeled and means windows-1252.</dd>
+<dt>Replacement</dt>
+<dd>Not detected.</dd>
+<dt>GB18030</dt>
+<dd>Detected as GBK.</dd>
+<dt>GBK</dt>
+<dt>Big5</dt>
+<dt>EUC-KR</dt>
+<dt>Shift_JIS</dt>
+<dt>windows-1250</dt>
+<dt>windows-1251</dt>
+<dt>windows-1252</dt>
+<dt>windows-1253</dt>
+<dt>windows-1254</dt>
+<dt>windows-1255</dt>
+<dt>windows-1256</dt>
+<dt>windows-1257</dt>
+<dt>windows-1258</dt>
+<dt>windows-874</dt>
+<dt>ISO-8859-2</dt>
+<dt>ISO-8859-7</dt>
+<dd>Detected: Historical locale-specific fallbacks.</dd>
+<dt>EUC-JP</dt>
+<dt>ISO-2022-JP</dt>
+<dt>KOI8-U</dt>
+<dt>ISO-8859-5</dt>
+<dt>IBM866</dt>
+<dd>Detected: Detected by multiple browsers past and present.</dd>
+<dt>KOI8-R</dt>
+<dd>Detected as KOI8-U. (Always guessing the U variant is less likely to corrupt non-box drawing characters.)</dd>
+<dt>ISO-8859-8-I</dt>
+<dd>Detected as windows-1255.</dd>
+<dt>ISO-8859-4</dt>
+<dd>Detected: Detected by IE and Chrome; in menu in IE and Firefox.</dd>
+<dt>ISO-8859-6</dt>
+<dd>Detected: Detected by IE and Chrome.</dd>
+<dt>ISO-8859-8</dt>
+<dd>Detected: Available in menu in IE and Firefox.</dd>
+<dt>ISO-8859-13</dt>
+<dd>Detected: Detected by Chrome. This encoding is so similar to windows-1257 that menu items for windows-1257 can be considered to accommodate this one in IE and Firefox. Due to the mechanics of this detector, if this wasn't included as a separate item, the windows-1257 detection wouldn't catch the cases that use curly quotes and are invalid as windows-1257.</dd>
+<dt>x-mac-cyrillic</dt>
+<dd>Not detected: Not detected by IE and Chrome. (Was previously detected by Firefox.)</dd>
+<dt>ISO-8859-3</dt>
+<dt>ISO-8859-10</dt>
+<dt>ISO-8859-14</dt>
+<dt>ISO-8859-15</dt>
+<dt>ISO-8859-16</dt>
+<dt>macintosh</dt>
+<dd>Not detected: These encodings have never been a locale-specific fallback in a major browser or a menu item in IE.</dd>
+</dl>
+
+## Known Problems
+
+* GBK detection is less accurate than in ced for short titles consisting of fewer than six hanzi. This is mostly due to the design that prioritizes optimizing binary size over accuracy on very short inputs.
+* Thai detection is inaccurate for short inputs.
+* windows-1257 detection is very inaccurate. (This detector currently doesn't use trigrams. ced uses 8 KB of trigram data to solve this.)
 
 ## Release Notes
 
