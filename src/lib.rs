@@ -41,13 +41,7 @@ const NON_LATIN_CAPITALIZATION_BONUS: i64 = 40;
 
 const NON_LATIN_ALL_CAPS_PENALTY: i64 = -40;
 
-// XXX rework how this gets applied
 const NON_LATIN_MIXED_CASE_PENALTY: i64 = -20;
-
-// XXX Remove this
-const NON_LATIN_CAMEL_PENALTY: i64 = -80;
-
-const NON_LATIN_IMPLAUSIBLE_CASE_TRANSITION_PENALTY: i64 = -100;
 
 // Manually calibrated relative to windows-1256 Arabic
 const CJK_BASE_SCORE: i64 = 41;
