@@ -1,3 +1,12 @@
+// Copyright 2019 Mozilla Foundation. See the COPYRIGHT
+// file at the top-level directory of this distribution.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
 use encoding_rs::Decoder;
 use encoding_rs::DecoderResult;
 use encoding_rs::Encoding;
@@ -5,25 +14,14 @@ use encoding_rs::BIG5;
 use encoding_rs::EUC_JP;
 use encoding_rs::EUC_KR;
 use encoding_rs::GBK;
-use encoding_rs::IBM866;
 use encoding_rs::ISO_2022_JP;
-use encoding_rs::ISO_8859_2;
-use encoding_rs::ISO_8859_4;
-use encoding_rs::ISO_8859_5;
-use encoding_rs::ISO_8859_6;
-use encoding_rs::ISO_8859_7;
 use encoding_rs::ISO_8859_8;
-use encoding_rs::KOI8_U;
 use encoding_rs::SHIFT_JIS;
 use encoding_rs::UTF_8;
-use encoding_rs::WINDOWS_1250;
 use encoding_rs::WINDOWS_1251;
 use encoding_rs::WINDOWS_1252;
 use encoding_rs::WINDOWS_1253;
 use encoding_rs::WINDOWS_1255;
-use encoding_rs::WINDOWS_1256;
-use encoding_rs::WINDOWS_1257;
-use encoding_rs::WINDOWS_874;
 
 mod data;
 mod tld;
@@ -104,9 +102,12 @@ const LATIN_LETTER: u8 = 2;
 /// ASCII punctionation caseless class for Hebrew
 const ASCII_PUNCTUATION: u8 = 3;
 
-fn contains_upper_case_or_non_ascii(label: &[u8]) -> bool {
+fn contains_upper_case_period_or_non_ascii(label: &[u8]) -> bool {
     for &b in label.into_iter() {
         if b >= 0x80 {
+            return true;
+        }
+        if b == b'.' {
             return true;
         }
         if b >= b'A' && b <= b'Z' {
@@ -185,7 +186,8 @@ impl NonLatinCasedCandidate {
             //   unfortunately is possible due to KOI8-U).
             // * Giving a small per-word penalty to all-uppercase KOI8-U (to favor
             //   all-lowercase Greek over all-caps KOI8-U).
-            // * Giving large penalties for random mixed-case.
+            // * Giving large penalties for mixed-case other than initial upper-case.
+            //   This also helps relative to non-cased encodings.
 
             // ASCII doesn't participate in non-Latin casing.
             if caseless_class == LATIN_LETTER {
@@ -194,6 +196,7 @@ impl NonLatinCasedCandidate {
                 // letters in this word, the ASCII-adjacency penalty gets
                 // applied to Latin/non-Latin pairs and the mix penalty
                 // to non-Latin/non-Latin pairs.
+                // XXX Apply penalty here
                 self.case_state = NonLatinCaseState::Mix;
             } else if !non_ascii_alphabetic {
                 // Space
@@ -1823,11 +1826,23 @@ fn count_non_ascii(buffer: &[u8]) -> u64 {
     count
 }
 
+/// A Web browser-oriented detector for guessing what character
+/// encoding a stream of bytes is encoded in.
+///
+/// The bytes are fed to the detector incrementally using the `feed`
+/// method. The current guess of the detector can be queried using
+/// the `guess` method. The guessing parameters are arguments to the
+/// `guess` method rather than arguments to the constructor in order
+/// to enable the application to check if the arguments affect the
+/// guessing outcome. (The specific use case is to disable UI for
+/// re-running the detector with UTF-8 allowed and the top-level
+/// domain name ignored if those arguments don't change the guess.)
 pub struct EncodingDetector {
     candidates: [Candidate; 27],
     non_ascii_seen: u64,
     last_before_non_ascii: Option<u8>,
     esc_seen: bool,
+    closed: bool,
 }
 
 impl EncodingDetector {
@@ -1838,7 +1853,40 @@ impl EncodingDetector {
         self.non_ascii_seen += count_non_ascii(buffer);
     }
 
+    /// Inform the detector of a chunk of input.
+    ///
+    /// The byte stream is represented as a sequence of calls to this
+    /// method such that the concatenation of the arguments to this
+    /// method form the byte stream. It does not matter how the application
+    /// chooses to chunk the stream. It is OK to call this method with
+    /// a zero-length byte slice.
+    ///
+    /// The end of the stream is indicated by calling this method with
+    /// `last` set to `true`. In that case, the end of the stream is
+    /// considered to occur after the last byte of the `buffer` (which
+    /// may be zero-length) passed in the same call. Once this method
+    /// has been called with `last` set to `true` this method must not
+    /// be called again.
+    ///
+    /// If you want to perform detection on just the prefix of a longer
+    /// stream, do not pass `last=true` after the prefix if the stream
+    /// actually still continues.
+    ///
+    /// Return `true` if after processing `buffer` the stream has
+    /// contained at least one non-ASCII byte and `false` if only
+    /// ASCII has been seen so far.
+    ///
+    /// # Panics
+    ///
+    /// If this method has previously been called with `last` set to `true`.
     pub fn feed(&mut self, buffer: &[u8], last: bool) -> bool {
+        assert!(
+            !self.closed,
+            "Must not feed again after feeding with last equaling true."
+        );
+        if last {
+            self.closed = true;
+        }
         let start = if self.non_ascii_seen == 0 && !self.esc_seen {
             let up_to = Encoding::ascii_valid_up_to(buffer);
             let start = if let Some(escape) = memchr::memchr(0x1B, &buffer[..up_to]) {
@@ -1867,12 +1915,37 @@ impl EncodingDetector {
         self.non_ascii_seen != 0
     }
 
+    /// Guess the encoding given the bytes pushed to the detector so far
+    /// (via `feed()`), the top-level domain name from which the bytes were
+    /// loaded, and an indication of whether to consider UTF-8 as a permissible
+    /// guess.
+    ///
+    /// The `tld` argument takes the rightmost DNS label of the hostname of the
+    /// host the stream was loaded from in lower-case ASCII form. That is, if
+    /// the label is an internationalized top-level domain name, it must be
+    /// provided in its Punycode form. If the TLD that the stream was loaded
+    /// from is unavalable, `None` may be passed instead, which is equivalent
+    /// to passing `Some(b"com")`.
+    ///
+    /// If the `allow_utf8` argument is set to `false`, the return value of
+    /// this method won't be `encoding_rs::UTF_8`. When performing detection
+    /// on `text/html` on non-`file:` URLs, Web browsers must pass `false`,
+    /// unless the user has taken a specific contextual action to request an
+    /// override. This way, Web developers cannot start depending on UTF-8
+    /// detection. Such reliance would make the Web Platform more brittle.
+    ///
+    /// Returns the guessed encoding.
+    ///
     /// # Panics
     ///
-    /// If `tld` contains non-ASCII or upper-case letters.
+    /// If `tld` contains non-ASCII, period, or upper-case letters. (The panic
+    /// condition is intentiolally limited to signs of failing to extract the
+    /// label correctly, failing to provide it in its Punycode form, and failure
+    /// to lower-case it. Full DNS label validation is intentionally not performed
+    /// to avoid panics when the reality doesn't match the specs.)
     pub fn guess(&self, tld: Option<&[u8]>, allow_utf8: bool) -> &'static Encoding {
         let tld_type = tld.map_or(Tld::Generic, |tld| {
-            assert!(!contains_upper_case_or_non_ascii(tld));
+            assert!(!contains_upper_case_period_or_non_ascii(tld));
             classify_tld(tld)
         });
 
@@ -1934,6 +2007,7 @@ impl EncodingDetector {
 
     const LOGICAL_INDEX: usize = 16;
 
+    /// Creates a new instance of the detector.
     pub fn new() -> Self {
         EncodingDetector {
             candidates: [
@@ -1968,6 +2042,7 @@ impl EncodingDetector {
             non_ascii_seen: 0,
             last_before_non_ascii: None,
             esc_seen: false,
+            closed: false,
         }
     }
 }
