@@ -14,14 +14,26 @@ use encoding_rs::BIG5;
 use encoding_rs::EUC_JP;
 use encoding_rs::EUC_KR;
 use encoding_rs::GBK;
+use encoding_rs::IBM866;
 use encoding_rs::ISO_2022_JP;
+use encoding_rs::ISO_8859_2;
+use encoding_rs::ISO_8859_5;
+use encoding_rs::ISO_8859_6;
+use encoding_rs::ISO_8859_7;
 use encoding_rs::ISO_8859_8;
+use encoding_rs::KOI8_U;
 use encoding_rs::SHIFT_JIS;
 use encoding_rs::UTF_8;
+use encoding_rs::WINDOWS_1250;
 use encoding_rs::WINDOWS_1251;
 use encoding_rs::WINDOWS_1252;
 use encoding_rs::WINDOWS_1253;
+use encoding_rs::WINDOWS_1254;
 use encoding_rs::WINDOWS_1255;
+use encoding_rs::WINDOWS_1256;
+use encoding_rs::WINDOWS_1257;
+use encoding_rs::WINDOWS_1258;
+use encoding_rs::WINDOWS_874;
 
 mod data;
 mod tld;
@@ -1585,6 +1597,196 @@ impl InnerCandidate {
     }
 }
 
+fn encoding_for_tld(tld: Tld) -> usize {
+    match tld {
+        Tld::CentralWindows | Tld::CentralCyrillic => EncodingDetector::CENTRAL_WINDOWS_INDEX,
+        Tld::Cyrillic => EncodingDetector::CYRILLIC_WINDOWS_INDEX,
+        Tld::Generic | Tld::Western | Tld::WesternCyrillic | Tld::WesternArabic | Tld::Eu => {
+            EncodingDetector::WESTERN_INDEX
+        }
+        Tld::IcelandicFaroese => EncodingDetector::ICELANDIC_INDEX,
+        Tld::Greek => EncodingDetector::GREEK_ISO_INDEX,
+        Tld::TurkishAzeri => EncodingDetector::TURKISH_INDEX,
+        Tld::Hebrew => EncodingDetector::LOGICAL_INDEX,
+        Tld::Arabic => EncodingDetector::ARABIC_WINDOWS_INDEX,
+        Tld::Baltic => EncodingDetector::BALTIC_WINDOWS_INDEX,
+        Tld::Vietnamese => EncodingDetector::VIETNAMESE_INDEX,
+        Tld::Thai => EncodingDetector::THAI_INDEX,
+        Tld::Simplified | Tld::SimplifiedTraditional => EncodingDetector::GBK_INDEX,
+        Tld::Traditional | Tld::TraditionalSimplified => EncodingDetector::BIG5_INDEX,
+        Tld::Japanese => EncodingDetector::SHIFT_JIS_INDEX,
+        Tld::Korean => EncodingDetector::EUC_KR_INDEX,
+        Tld::CentralIso => EncodingDetector::CENTRAL_ISO_INDEX,
+    }
+}
+
+fn encoding_is_native_to_tld(tld: Tld, encoding: usize) -> bool {
+    match tld {
+        Tld::CentralWindows => encoding == EncodingDetector::CENTRAL_WINDOWS_INDEX,
+        Tld::Cyrillic => {
+            encoding == EncodingDetector::CYRILLIC_WINDOWS_INDEX
+                || encoding == EncodingDetector::CYRILLIC_KOI_INDEX
+                || encoding == EncodingDetector::CYRILLIC_IBM_INDEX
+                || encoding == EncodingDetector::CYRILLIC_ISO_INDEX
+        }
+        Tld::Western => encoding == EncodingDetector::WESTERN_INDEX,
+        Tld::Greek => {
+            encoding == EncodingDetector::GREEK_WINDOWS_INDEX
+                || encoding == EncodingDetector::GREEK_ISO_INDEX
+        }
+        Tld::TurkishAzeri => encoding == EncodingDetector::TURKISH_INDEX,
+        Tld::Hebrew => encoding == EncodingDetector::LOGICAL_INDEX,
+        Tld::Arabic => {
+            encoding == EncodingDetector::ARABIC_WINDOWS_INDEX
+                || encoding == EncodingDetector::ARABIC_ISO_INDEX
+        }
+        Tld::Baltic => {
+            encoding == EncodingDetector::BALTIC_WINDOWS_INDEX
+                || encoding == EncodingDetector::BALTIC_ISO13_INDEX
+                || encoding == EncodingDetector::BALTIC_ISO4_INDEX
+        }
+        Tld::Vietnamese => encoding == EncodingDetector::VIETNAMESE_INDEX,
+        Tld::Thai => encoding == EncodingDetector::THAI_INDEX,
+        Tld::Simplified => encoding == EncodingDetector::GBK_INDEX,
+        Tld::Traditional => encoding == EncodingDetector::BIG5_INDEX,
+        Tld::Japanese => {
+            encoding == EncodingDetector::SHIFT_JIS_INDEX
+                || encoding == EncodingDetector::EUC_JP_INDEX
+        }
+        Tld::Korean => encoding == EncodingDetector::EUC_KR_INDEX,
+        Tld::SimplifiedTraditional | Tld::TraditionalSimplified => {
+            encoding == EncodingDetector::GBK_INDEX || encoding == EncodingDetector::BIG5_INDEX
+        }
+        Tld::CentralIso => encoding == EncodingDetector::CENTRAL_ISO_INDEX,
+        Tld::IcelandicFaroese => encoding == EncodingDetector::ICELANDIC_INDEX,
+        Tld::WesternCyrillic => {
+            encoding == EncodingDetector::WESTERN_INDEX
+                || encoding == EncodingDetector::CYRILLIC_WINDOWS_INDEX
+                || encoding == EncodingDetector::CYRILLIC_KOI_INDEX
+                || encoding == EncodingDetector::CYRILLIC_IBM_INDEX
+                || encoding == EncodingDetector::CYRILLIC_ISO_INDEX
+        }
+        Tld::CentralCyrillic => {
+            encoding == EncodingDetector::CENTRAL_WINDOWS_INDEX
+                || encoding == EncodingDetector::CENTRAL_ISO_INDEX
+                || encoding == EncodingDetector::CYRILLIC_WINDOWS_INDEX
+                || encoding == EncodingDetector::CYRILLIC_KOI_INDEX
+                || encoding == EncodingDetector::CYRILLIC_IBM_INDEX
+                || encoding == EncodingDetector::CYRILLIC_ISO_INDEX
+        }
+        Tld::WesternArabic => {
+            encoding == EncodingDetector::WESTERN_INDEX
+                || encoding == EncodingDetector::ARABIC_WINDOWS_INDEX
+                || encoding == EncodingDetector::ARABIC_ISO_INDEX
+        }
+        Tld::Eu => {
+            encoding == EncodingDetector::WESTERN_INDEX
+                || encoding == EncodingDetector::ICELANDIC_INDEX
+                || encoding == EncodingDetector::CENTRAL_WINDOWS_INDEX
+                || encoding == EncodingDetector::CENTRAL_ISO_INDEX
+                || encoding == EncodingDetector::CYRILLIC_WINDOWS_INDEX
+                || encoding == EncodingDetector::CYRILLIC_KOI_INDEX
+                || encoding == EncodingDetector::CYRILLIC_IBM_INDEX
+                || encoding == EncodingDetector::CYRILLIC_ISO_INDEX
+                || encoding == EncodingDetector::GREEK_WINDOWS_INDEX
+                || encoding == EncodingDetector::GREEK_ISO_INDEX
+                || encoding == EncodingDetector::BALTIC_WINDOWS_INDEX
+                || encoding == EncodingDetector::BALTIC_ISO13_INDEX
+                || encoding == EncodingDetector::BALTIC_ISO4_INDEX
+        }
+        Tld::Generic => {
+            unreachable!();
+        }
+    }
+}
+
+fn score_adjustment(score: i64, encoding: usize, tld: Tld) -> i64 {
+    if score < 1 {
+        return 0;
+    }
+    // This is the most ad hoc part of this library.
+    let (divisor, constant) = match tld {
+        Tld::Generic => {
+            unreachable!();
+        }
+        Tld::CentralWindows => {
+            return 0;
+        }
+        Tld::Cyrillic => {
+            return 0;
+        }
+        Tld::Western => {
+            return 0;
+        }
+        Tld::Greek => {
+            return 0;
+        }
+        Tld::TurkishAzeri => {
+            return 0;
+        }
+        Tld::Hebrew => {
+            return 0;
+        }
+        Tld::Arabic => {
+            return 0;
+        }
+        Tld::Baltic => {
+            return 0;
+        }
+        Tld::Vietnamese => {
+            return 0;
+        }
+        Tld::Thai => {
+            return 0;
+        }
+        Tld::Simplified => {
+            if encoding == EncodingDetector::EUC_KR_INDEX {
+                (18, 20)
+            } else if encoding == EncodingDetector::EUC_JP_INDEX {
+                (30, 20)
+            } else if encoding == EncodingDetector::BIG5_INDEX {
+                (30, 75)
+            } else {
+                return 0;
+            }
+        }
+        Tld::Traditional => {
+            return 0;
+        }
+        Tld::Japanese => {
+            return 0;
+        }
+        Tld::Korean => {
+            return 0;
+        }
+        Tld::SimplifiedTraditional => {
+            return 0;
+        }
+        Tld::TraditionalSimplified => {
+            return 0;
+        }
+        Tld::CentralIso => {
+            return 0;
+        }
+        Tld::IcelandicFaroese => {
+            return 0;
+        }
+        Tld::WesternCyrillic => {
+            return 0;
+        }
+        Tld::CentralCyrillic => {
+            return 0;
+        }
+        Tld::WesternArabic => {
+            return 0;
+        }
+        Tld::Eu => {
+            return 0;
+        }
+    };
+    (score / divisor) + constant
+}
+
 struct Candidate {
     inner: InnerCandidate,
     score: Option<i64>,
@@ -1725,36 +1927,51 @@ impl Candidate {
         }
     }
 
-    fn score(&self, _: Tld) -> Option<i64> {
+    fn score(&self, encoding: usize, tld: Tld, expectation_is_valid: bool) -> Option<i64> {
         match &self.inner {
             InnerCandidate::NonLatinCased(c) => {
-                if c.longest_word < 2 {
+                if c.longest_word < 2 && !encoding_is_native_to_tld(tld, encoding) {
                     return None;
                 }
             }
             InnerCandidate::Caseless(c) => {
-                if c.longest_word < 2 {
+                if c.longest_word < 2 && !encoding_is_native_to_tld(tld, encoding) {
                     return None;
                 }
             }
             InnerCandidate::ArabicFrench(c) => {
-                if c.longest_word < 2 {
+                if c.longest_word < 2 && !encoding_is_native_to_tld(tld, encoding) {
                     return None;
                 }
             }
             InnerCandidate::Logical(c) => {
-                if c.longest_word < 2 {
+                if c.longest_word < 2 && !encoding_is_native_to_tld(tld, encoding) {
                     return None;
                 }
             }
             InnerCandidate::Visual(c) => {
-                if c.longest_word < 2 {
+                if c.longest_word < 2 && !encoding_is_native_to_tld(tld, encoding) {
                     return None;
                 }
             }
             _ => {}
         }
-        self.score
+        if tld == Tld::Generic {
+            return self.score;
+        }
+        if let Some(score) = self.score {
+            if encoding == encoding_for_tld(tld) {
+                return Some(score + 1);
+            }
+            if expectation_is_valid {
+                return Some(score - score_adjustment(score, encoding, tld));
+            }
+            // If expectation is no longer valid, fall back to
+            // generic behavior.
+            // XXX Flipped Chinese and Central
+            return Some(score);
+        }
+        None
     }
 
     fn plausible_punctuation(&self) -> u64 {
@@ -1963,10 +2180,19 @@ impl EncodingDetector {
             return UTF_8;
         }
 
-        let mut encoding = WINDOWS_1252;
+        let mut encoding = self.candidates[encoding_for_tld(tld_type)].encoding();
         let mut max = 0i64;
-        for candidate in (&self.candidates[Self::FIRST_NORMAL..]).iter() {
-            if let Some(score) = candidate.score(tld_type) {
+        let mut expectation_is_valid = false;
+        if tld_type != Tld::Generic {
+            for (i, candidate) in self.candidates.iter().enumerate().skip(Self::FIRST_NORMAL) {
+                if encoding_is_native_to_tld(tld_type, i) && candidate.score.is_some() {
+                    expectation_is_valid = true;
+                    break;
+                }
+            }
+        }
+        for (i, candidate) in self.candidates.iter().enumerate().skip(Self::FIRST_NORMAL) {
+            if let Some(score) = candidate.score(i, tld_type, expectation_is_valid) {
                 if score > max {
                     max = score;
                     encoding = candidate.encoding();
@@ -1974,7 +2200,8 @@ impl EncodingDetector {
             }
         }
         let visual = &self.candidates[Self::VISUAL_INDEX];
-        if let Some(visual_score) = visual.score(tld_type) {
+        if let Some(visual_score) = visual.score(Self::VISUAL_INDEX, tld_type, expectation_is_valid)
+        {
             if visual_score > max
                 && visual.plausible_punctuation()
                     > self.candidates[Self::LOGICAL_INDEX].plausible_punctuation()
@@ -1989,23 +2216,79 @@ impl EncodingDetector {
 
     // XXX Test-only API
     pub fn find_score(&self, encoding: &'static Encoding) -> Option<i64> {
-        for candidate in self.candidates.iter() {
+        let tld_type = Tld::Generic;
+        let mut expectation_is_valid = false;
+        if tld_type != Tld::Generic {
+            for (i, candidate) in self.candidates.iter().enumerate().skip(Self::FIRST_NORMAL) {
+                if encoding_is_native_to_tld(tld_type, i) && candidate.score.is_some() {
+                    expectation_is_valid = true;
+                    break;
+                }
+            }
+        }
+        for (i, candidate) in self.candidates.iter().enumerate() {
             if encoding == candidate.encoding() {
-                return candidate.score(Tld::Generic);
+                return candidate.score(i, Tld::Generic, expectation_is_valid);
             }
         }
         Some(0)
     }
 
+    const FIRST_NORMAL: usize = 3;
+
     const UTF_8_INDEX: usize = 0;
 
     const ISO_2022_JP_INDEX: usize = 1;
 
-    const FIRST_NORMAL: usize = 3;
-
     const VISUAL_INDEX: usize = 2;
 
+    const GBK_INDEX: usize = 3;
+
+    const EUC_JP_INDEX: usize = 4;
+
+    const EUC_KR_INDEX: usize = 5;
+
+    const SHIFT_JIS_INDEX: usize = 6;
+
+    const BIG5_INDEX: usize = 7;
+
+    const WESTERN_INDEX: usize = 8;
+
+    const CYRILLIC_WINDOWS_INDEX: usize = 9;
+
+    const CENTRAL_WINDOWS_INDEX: usize = 10;
+
+    const CENTRAL_ISO_INDEX: usize = 11;
+
+    const ARABIC_WINDOWS_INDEX: usize = 12;
+
+    const ICELANDIC_INDEX: usize = 13;
+
+    const TURKISH_INDEX: usize = 14;
+
+    const THAI_INDEX: usize = 15;
+
     const LOGICAL_INDEX: usize = 16;
+
+    const GREEK_WINDOWS_INDEX: usize = 17;
+
+    const GREEK_ISO_INDEX: usize = 18;
+
+    const BALTIC_WINDOWS_INDEX: usize = 19;
+
+    const BALTIC_ISO13_INDEX: usize = 20;
+
+    const CYRILLIC_KOI_INDEX: usize = 21;
+
+    const CYRILLIC_IBM_INDEX: usize = 22;
+
+    const ARABIC_ISO_INDEX: usize = 23;
+
+    const VIETNAMESE_INDEX: usize = 24;
+
+    const BALTIC_ISO4_INDEX: usize = 25;
+
+    const CYRILLIC_ISO_INDEX: usize = 26;
 
     /// Creates a new instance of the detector.
     pub fn new() -> Self {
