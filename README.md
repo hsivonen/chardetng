@@ -20,6 +20,14 @@ online.
 
 The purpose of this detector is user retention for Firefox by ensuring that the long tail of the legacy Web is not more convenient to use in Chrome than in Firefox. (Chrome deployed [ced](https://github.com/google/compact_enc_det/), which left Firefox less convenient to use until the deployment of this detector.)
 
+## About the Name
+
+`chardet` was the name of Mozilla's old encoding detector. I named this one `chardetng`, because this the next generation of encoding detector in Firefox. There is no code reuse from the old `chardet`.
+
+## Optimization Goals
+
+This crate aims to be more accurate than ICU, more complete than `chardet`, more explainable and modifiable than `compact_enc_det` (aka. ced), and, in an application that already depends on `encoding_rs` for other reasons, smaller in added binary footprint than `compact_enc_det`.
+
 ## Principle of Operation
 
 In general `chardetng` prefers to do negative matching (rule out possibilities from the set of plausible encodings) than to do positive matching. Since negative matching is insufficient, there is positive matching, too.
@@ -94,11 +102,23 @@ In general `chardetng` prefers to do negative matching (rule out possibilities f
 <dd>Not detected: These encodings have never been a locale-specific fallback in a major browser or a menu item in IE.</dd>
 </dl>
 
+Of the detected encodings, ISO-8859-5, ISO-8859-6, and ISO-8859-4 are the ones that something else is the most likely to be misdetected as, and, I believe, the three least-used encodings of the ones detected, so these three are the most likely ones to either be removed or downplayed.
+
 ## Known Problems
 
 * GBK detection is less accurate than in ced for short titles consisting of fewer than six hanzi. This is mostly due to the design that prioritizes optimizing binary size over accuracy on very short inputs.
 * Thai detection is inaccurate for short inputs.
 * windows-1257 detection is very inaccurate. (This detector currently doesn't use trigrams. ced uses 8 KB of trigram data to solve this.)
+* On non-generic domains, some encodings that are confusable with the legacy encodings native to the TLD are excluded from guesses outright unless the input is invalid according to all the TLD-native encodings.
+
+## Roadmap
+
+[ ] Improve windows-874 detection on short inputs.
+[ ] Improve GBK detection on short inputs.
+[ ] Reorganize the frequency data for telling short GBK, EUC-JP, and EUC-KR inputs apart.
+[ ] Make windows-1257 detection on generic domains a lot more accurate (likely requires looking at trigrams).
+[ ] Tune Central European detection.
+[ ] Tune the penalties applied to confusable encodings on non-generic TLDs to make detection of confusable encodings possible on non-generic TLDs.
 
 ## Release Notes
 

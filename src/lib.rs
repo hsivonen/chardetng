@@ -7,6 +7,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! `chardetng` is a character encoding detector for legacy Web content.
+//!
+//! It is optimized for binary size in applicaitons that already depend
+//! on `encoding_rs` for other reasons.
+
 use encoding_rs::Decoder;
 use encoding_rs::DecoderResult;
 use encoding_rs::Encoding;
@@ -14,26 +19,14 @@ use encoding_rs::BIG5;
 use encoding_rs::EUC_JP;
 use encoding_rs::EUC_KR;
 use encoding_rs::GBK;
-use encoding_rs::IBM866;
 use encoding_rs::ISO_2022_JP;
-use encoding_rs::ISO_8859_2;
-use encoding_rs::ISO_8859_5;
-use encoding_rs::ISO_8859_6;
-use encoding_rs::ISO_8859_7;
 use encoding_rs::ISO_8859_8;
-use encoding_rs::KOI8_U;
 use encoding_rs::SHIFT_JIS;
 use encoding_rs::UTF_8;
-use encoding_rs::WINDOWS_1250;
 use encoding_rs::WINDOWS_1251;
 use encoding_rs::WINDOWS_1252;
 use encoding_rs::WINDOWS_1253;
-use encoding_rs::WINDOWS_1254;
 use encoding_rs::WINDOWS_1255;
-use encoding_rs::WINDOWS_1256;
-use encoding_rs::WINDOWS_1257;
-use encoding_rs::WINDOWS_1258;
-use encoding_rs::WINDOWS_874;
 
 mod data;
 mod tld;
