@@ -113,8 +113,9 @@ Of the detected encodings, ISO-8859-5, ISO-8859-6, and ISO-8859-4 are the ones t
 
 ## Roadmap
 
-[ ] Improve windows-874 detection on short inputs.
-[ ] Improve GBK detection on short inputs.
+[ ] Investigate parallelizing the `feed` method using Rayon.
+[ ] Improve windows-874 detection for short inputs.
+[ ] Improve GBK detection for short inputs.
 [ ] Reorganize the frequency data for telling short GBK, EUC-JP, and EUC-KR inputs apart.
 [ ] Make windows-1257 detection on generic domains a lot more accurate (likely requires looking at trigrams).
 [ ] Tune Central European detection.
