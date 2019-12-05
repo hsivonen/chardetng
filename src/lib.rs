@@ -23,10 +23,6 @@ use encoding_rs::ISO_2022_JP;
 use encoding_rs::ISO_8859_8;
 use encoding_rs::SHIFT_JIS;
 use encoding_rs::UTF_8;
-use encoding_rs::WINDOWS_1251;
-use encoding_rs::WINDOWS_1252;
-use encoding_rs::WINDOWS_1253;
-use encoding_rs::WINDOWS_1255;
 
 mod data;
 mod tld;
@@ -2563,6 +2559,10 @@ impl EncodingDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use encoding_rs::WINDOWS_1251;
+    use encoding_rs::WINDOWS_1252;
+    use encoding_rs::WINDOWS_1253;
+    use encoding_rs::WINDOWS_1255;
 
     fn check(input: &str, encoding: &'static Encoding) {
         let (bytes, _, _) = encoding.encode(input);

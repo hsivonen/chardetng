@@ -2,7 +2,6 @@
  * https://creativecommons.org/publicdomain/zero/1.0/ */
 
 use super::IMPLAUSIBILITY_PENALTY;
-use super::LATIN_ADJACENCY_PENALTY;
 use encoding_rs::Encoding;
 use encoding_rs::IBM866_INIT;
 use encoding_rs::ISO_8859_13_INIT;
