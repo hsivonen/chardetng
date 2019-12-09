@@ -123,6 +123,10 @@ Of the detected encodings, ISO-8859-5, ISO-8859-6, and ISO-8859-4 are the ones t
 
 ## Release Notes
 
+### 0.1.1
+
+* Detect Visual Hebrew more often.
+
 ### 0.1.0
 
 * Initial release.

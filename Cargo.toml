@@ -15,3 +15,6 @@ categories = ["text-processing", "encoding", "web-programming", "internationaliz
 [dependencies]
 encoding_rs = "0.8.17"
 memchr = "2.2.0"
+
+[dev-dependencies]
+detone = "1.0.0"

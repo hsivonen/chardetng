@@ -23,6 +23,7 @@ use encoding_rs::ISO_2022_JP;
 use encoding_rs::ISO_8859_8;
 use encoding_rs::SHIFT_JIS;
 use encoding_rs::UTF_8;
+use encoding_rs::WINDOWS_1255;
 
 mod data;
 mod tld;
@@ -2398,7 +2399,7 @@ impl EncodingDetector {
         let visual = &self.candidates[Self::VISUAL_INDEX];
         if let Some(visual_score) = visual.score(Self::VISUAL_INDEX, tld_type, expectation_is_valid)
         {
-            if visual_score > max
+            if (visual_score > max || encoding == WINDOWS_1255)
                 && visual.plausible_punctuation()
                     > self.candidates[Self::LOGICAL_INDEX].plausible_punctuation()
             {
@@ -2559,13 +2560,26 @@ impl EncodingDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use detone::IterDecomposeVietnamese;
+    use encoding_rs::ISO_8859_6;
     use encoding_rs::WINDOWS_1251;
     use encoding_rs::WINDOWS_1252;
     use encoding_rs::WINDOWS_1253;
-    use encoding_rs::WINDOWS_1255;
+    use encoding_rs::WINDOWS_1256;
+    use encoding_rs::WINDOWS_1258;
+    use encoding_rs::WINDOWS_874;
 
     fn check(input: &str, encoding: &'static Encoding) {
-        let (bytes, _, _) = encoding.encode(input);
+        let orthographic;
+        let (bytes, _, _) = if encoding == WINDOWS_1258 {
+            orthographic = input
+                .chars()
+                .decompose_vietnamese_tones(true)
+                .collect::<String>();
+            encoding.encode(&orthographic)
+        } else {
+            encoding.encode(input)
+        };
         let mut det = EncodingDetector::new();
         det.feed(&bytes, true);
         let enc = det.guess(None, false);
@@ -2586,6 +2600,19 @@ mod tests {
     #[test]
     fn test_fi() {
         check("Ääni", WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_pt() {
+        check(
+            "Este é um teste de codificação de caracteres.",
+            WINDOWS_1252,
+        );
+    }
+
+    #[test]
+    fn test_is() {
+        check("Þetta er kóðunarpróf á staf. Fyrir sum tungumál sem nota latneska stafi þurfum við meira inntak til að taka ákvörðunina.", WINDOWS_1252);
     }
 
     #[test]
@@ -2613,10 +2640,65 @@ mod tests {
         check("日本語", ISO_2022_JP);
     }
 
-    // #[test]
-    // fn test_th() {
-    //     check("ไทย", WINDOWS_874);
-    // }
+    #[test]
+    fn test_th() {
+        check("นี่คือการทดสอบการเข้ารหัสอักขระ", WINDOWS_874);
+    }
+
+    #[test]
+    fn test_vi() {
+        check("Đây là một thử nghiệm mã hóa ký tự.", WINDOWS_1258);
+    }
+
+    #[test]
+    fn test_simplified() {
+        check("这是一个字符编码测试。", GBK);
+    }
+
+    #[test]
+    fn test_traditional() {
+        check("這是一個字符編碼測試。", BIG5);
+    }
+
+    #[test]
+    fn test_ko() {
+        check("이것은 문자 인코딩 테스트입니다.", EUC_KR);
+    }
+
+    #[test]
+    fn test_shift() {
+        check("これは文字実験です。", SHIFT_JIS);
+    }
+
+    #[test]
+    fn test_euc() {
+        check("これは文字実験です。", EUC_JP);
+    }
+
+    #[test]
+    fn test_ar() {
+        check("هذا هو اختبار ترميز الأحرف.", WINDOWS_1256);
+    }
+
+    #[test]
+    fn test_ar_iso() {
+        check("هذا هو اختبار ترميز الأحرف.", ISO_8859_6);
+    }
+
+    #[test]
+    fn test_fa() {
+        check("این یک تست رمزگذاری کاراکتر است.", WINDOWS_1256);
+    }
+
+    #[test]
+    fn test_visual() {
+        check(".םיוות דודיק ןחבמ והז", ISO_8859_8);
+    }
+
+    #[test]
+    fn test_yi() {
+        check("דאָס איז אַ טעסט פֿאַר קאָדירונג פון כאַראַקטער.", WINDOWS_1255);
+    }
 
     #[test]
     fn test_foo() {
