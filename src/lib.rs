@@ -2346,8 +2346,10 @@ impl EncodingDetector {
                 return UTF_8;
             }
             // Various test cases that prohibit UTF-8 detection want to
-            // see windows-1252 specifically.
-            return WINDOWS_1252;
+            // see windows-1252 specifically. These tests run on generic
+            // domains. However, if we returned windows-1252 on
+            // some non-generic domains, we'd cause reloads.
+            return self.candidates[encoding_for_tld(tld_type)].encoding();
         }
 
         let mut encoding = self.candidates[encoding_for_tld(tld_type)].encoding();

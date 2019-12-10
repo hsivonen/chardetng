@@ -123,6 +123,10 @@ Of the detected encodings, ISO-8859-5, ISO-8859-6, and ISO-8859-4 are the ones t
 
 ## Release Notes
 
+### 0.1.3
+
+* Return TLD-affiliated encoding if UTF-8 is valid but prohibited.
+
 ### 0.1.2
 
 * Return UTF-8 if valid and allowed even if all-ASCII.
