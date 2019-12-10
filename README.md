@@ -123,6 +123,11 @@ Of the detected encodings, ISO-8859-5, ISO-8859-6, and ISO-8859-4 are the ones t
 
 ## Release Notes
 
+### 0.1.2
+
+* Return UTF-8 if valid and allowed even if all-ASCII.
+* Return windows-1252 if UTF-8 valid and prohibited, because various test cases require this.
+
 ### 0.1.1
 
 * Detect Visual Hebrew more often.

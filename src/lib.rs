@@ -2594,7 +2594,7 @@ mod tests {
     fn test_empty() {
         let mut det = EncodingDetector::new();
         let seen_non_ascii = det.feed(b"", true);
-        let enc = det.guess(None, true);
+        let enc = det.guess(None, false);
         assert_eq!(enc, WINDOWS_1252);
         assert!(!seen_non_ascii);
     }
