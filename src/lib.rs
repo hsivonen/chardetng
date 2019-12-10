@@ -23,6 +23,7 @@ use encoding_rs::ISO_2022_JP;
 use encoding_rs::ISO_8859_8;
 use encoding_rs::SHIFT_JIS;
 use encoding_rs::UTF_8;
+use encoding_rs::WINDOWS_1252;
 use encoding_rs::WINDOWS_1255;
 
 mod data;
@@ -2340,11 +2341,13 @@ impl EncodingDetector {
             return ISO_2022_JP;
         }
 
-        if allow_utf8
-            && self.candidates[Self::UTF_8_INDEX].score.is_some()
-            && self.non_ascii_seen > 0
-        {
-            return UTF_8;
+        if self.candidates[Self::UTF_8_INDEX].score.is_some() {
+            if allow_utf8 {
+                return UTF_8;
+            }
+            // Various test cases that prohibit UTF-8 detection want to
+            // see windows-1252 specifically.
+            return WINDOWS_1252;
         }
 
         let mut encoding = self.candidates[encoding_for_tld(tld_type)].encoding();
@@ -2563,7 +2566,6 @@ mod tests {
     use detone::IterDecomposeVietnamese;
     use encoding_rs::ISO_8859_6;
     use encoding_rs::WINDOWS_1251;
-    use encoding_rs::WINDOWS_1252;
     use encoding_rs::WINDOWS_1253;
     use encoding_rs::WINDOWS_1256;
     use encoding_rs::WINDOWS_1258;
