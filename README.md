@@ -117,11 +117,16 @@ Of the detected encodings, ISO-8859-5, ISO-8859-6, and ISO-8859-4 are the ones t
 - [ ] Improve windows-874 detection for short inputs.
 - [ ] Improve GBK detection for short inputs.
 - [ ] Reorganize the frequency data for telling short GBK, EUC-JP, and EUC-KR inputs apart.
-- [ ] Make windows-1257 detection on generic domains a lot more accurate (likely requires looking at trigrams).
+- [ ] Make Lithuanian and Latvian detection on generic domains a lot more accurate (likely requires looking at trigrams).
 - [ ] Tune Central European detection.
 - [ ] Tune the penalties applied to confusable encodings on non-generic TLDs to make detection of confusable encodings possible on non-generic TLDs.
 
 ## Release Notes
+
+### 0.1.4
+
+* Move Estonian from the Baltic model to the Western model. This improves overall Estonian detection but causes š and ž encoded as windows-1257, ISO-8859-13, or ISO-8859-4 to get misdecoded. (It would be possible to add a post-processing step to adjust for š and ž, but this would cause reloads given the way chardetng is integrated with Firefox.)
+* Properly classify letters that ISO-8859-4 has but windows-1257 doesn't have in order to avoid misdetecting non-ISO-8859-4 input as ISO-8859-4.
 
 ### 0.1.3
 
