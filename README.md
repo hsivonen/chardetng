@@ -51,7 +51,7 @@ In general `chardetng` prefers to do negative matching (rule out possibilities f
 <dt>UTF-16[BE|LE]</dt>
 <dd>Not detected: Detecting these belongs on the BOM layer.</dd>
 <dt>x-user-defined</dt>
-<dd>Not detected: This encoding is for XHR. `<meta charset=x-user-defined>` in HTML is not unlabeled and means windows-1252.</dd>
+<dd>Not detected: This encoding is for XHR. <code>&lt;meta charset=x-user-defined></code> in HTML is not unlabeled and means windows-1252.</dd>
 <dt>Replacement</dt>
 <dd>Not detected.</dd>
 <dt>GB18030</dt>
