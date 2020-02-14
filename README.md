@@ -102,8 +102,6 @@ In general `chardetng` prefers to do negative matching (rule out possibilities f
 <dd>Not detected: These encodings have never been a locale-specific fallback in a major browser or a menu item in IE.</dd>
 </dl>
 
-Of the detected encodings, ISO-8859-5, ISO-8859-6, and ISO-8859-4 are the ones that something else is the most likely to be misdetected as, and, I believe, the three least-used encodings of the ones detected, so these three are the most likely ones to either be removed or downplayed.
-
 ## Known Problems
 
 * GBK detection is less accurate than in ced for short titles consisting of fewer than six hanzi. This is mostly due to the design that prioritizes optimizing binary size over accuracy on very short inputs.
