@@ -102,9 +102,6 @@ const CJK_OTHER: i64 = CJK_SECONDARY_BASE_SCORE / 4;
 /// Latin letter caseless class
 const LATIN_LETTER: u8 = 2;
 
-/// ASCII punctionation caseless class for Hebrew
-const ASCII_PUNCTUATION: u8 = 3;
-
 fn contains_upper_case_period_or_non_ascii(label: &[u8]) -> bool {
     for &b in label.into_iter() {
         if b >= 0x80 {
@@ -517,6 +514,13 @@ impl CaselessCandidate {
     }
 }
 
+fn is_ascii_punctuation(byte: u8) -> bool {
+    match byte {
+        b'.' | b',' | b':' | b';' | b'?' | b'!' => true,
+        _ => false,
+    }
+}
+
 struct LogicalCandidate {
     data: &'static SingleByteData,
     prev: u8,
@@ -565,7 +569,7 @@ impl LogicalCandidate {
                 score += self.data.score(caseless_class, self.prev);
 
                 let prev_non_ascii_alphabetic = self.data.is_non_latin_alphabetic(self.prev);
-                if caseless_class == ASCII_PUNCTUATION && prev_non_ascii_alphabetic {
+                if caseless_class == 0 && prev_non_ascii_alphabetic && is_ascii_punctuation(b) {
                     self.plausible_punctuation += 1;
                 }
 
@@ -587,6 +591,7 @@ struct VisualCandidate {
     data: &'static SingleByteData,
     prev: u8,
     prev_ascii: bool,
+    prev_punctuation: bool,
     plausible_punctuation: u64,
     current_word_len: u64,
     longest_word: u64,
@@ -598,6 +603,7 @@ impl VisualCandidate {
             data: data,
             prev: 0,
             prev_ascii: true,
+            prev_punctuation: false,
             plausible_punctuation: 0,
             current_word_len: 0,
             longest_word: 0,
@@ -630,7 +636,7 @@ impl VisualCandidate {
             if !ascii_pair {
                 score += self.data.score(caseless_class, self.prev);
 
-                if non_ascii_alphabetic && self.prev == ASCII_PUNCTUATION {
+                if non_ascii_alphabetic && self.prev_punctuation {
                     self.plausible_punctuation += 1;
                 }
 
@@ -645,6 +651,7 @@ impl VisualCandidate {
 
             self.prev_ascii = ascii;
             self.prev = caseless_class;
+            self.prev_punctuation = caseless_class == 0 && is_ascii_punctuation(b);
         }
         Some(score)
     }
@@ -2417,54 +2424,55 @@ impl EncodingDetector {
     }
 
     // XXX Test-only API
-    // pub fn find_score(&self, encoding: &'static Encoding) -> Option<i64> {
-    //     let mut tld_type = Tld::Generic;
-    //     let mut expectation_is_valid = false;
-    //     if tld_type != Tld::Generic {
-    //         for (i, candidate) in self.candidates.iter().enumerate().skip(Self::FIRST_NORMAL) {
-    //             if encoding_is_native_to_tld(tld_type, i) && candidate.score.is_some() {
-    //                 expectation_is_valid = true;
-    //                 break;
-    //             }
-    //         }
-    //     }
-    //     if !expectation_is_valid {
-    //         // Flip Chinese and Central around
-    //         match tld_type {
-    //             Tld::Simplified => {
-    //                 if self.candidates[Self::BIG5_INDEX].score.is_some() {
-    //                     tld_type = Tld::Traditional;
-    //                     expectation_is_valid = true;
-    //                 }
-    //             }
-    //             Tld::Traditional => {
-    //                 if self.candidates[Self::GBK_INDEX].score.is_some() {
-    //                     tld_type = Tld::Simplified;
-    //                     expectation_is_valid = true;
-    //                 }
-    //             }
-    //             Tld::CentralWindows => {
-    //                 if self.candidates[Self::CENTRAL_ISO_INDEX].score.is_some() {
-    //                     tld_type = Tld::CentralIso;
-    //                     expectation_is_valid = true;
-    //                 }
-    //             }
-    //             Tld::CentralIso => {
-    //                 if self.candidates[Self::CENTRAL_WINDOWS_INDEX].score.is_some() {
-    //                     tld_type = Tld::CentralWindows;
-    //                     expectation_is_valid = true;
-    //                 }
-    //             }
-    //             _ => {}
-    //         }
-    //     }
-    //     for (i, candidate) in self.candidates.iter().enumerate() {
-    //         if encoding == candidate.encoding() {
-    //             return candidate.score(i, tld_type, expectation_is_valid);
-    //         }
-    //     }
-    //     Some(0)
-    // }
+    #[cfg(feature = "testing-only-no-semver-guarantees-do-not-use")]
+    pub fn find_score(&self, encoding: &'static Encoding) -> Option<i64> {
+        let mut tld_type = Tld::Generic;
+        let mut expectation_is_valid = false;
+        if tld_type != Tld::Generic {
+            for (i, candidate) in self.candidates.iter().enumerate().skip(Self::FIRST_NORMAL) {
+                if encoding_is_native_to_tld(tld_type, i) && candidate.score.is_some() {
+                    expectation_is_valid = true;
+                    break;
+                }
+            }
+        }
+        if !expectation_is_valid {
+            // Flip Chinese and Central around
+            match tld_type {
+                Tld::Simplified => {
+                    if self.candidates[Self::BIG5_INDEX].score.is_some() {
+                        tld_type = Tld::Traditional;
+                        expectation_is_valid = true;
+                    }
+                }
+                Tld::Traditional => {
+                    if self.candidates[Self::GBK_INDEX].score.is_some() {
+                        tld_type = Tld::Simplified;
+                        expectation_is_valid = true;
+                    }
+                }
+                Tld::CentralWindows => {
+                    if self.candidates[Self::CENTRAL_ISO_INDEX].score.is_some() {
+                        tld_type = Tld::CentralIso;
+                        expectation_is_valid = true;
+                    }
+                }
+                Tld::CentralIso => {
+                    if self.candidates[Self::CENTRAL_WINDOWS_INDEX].score.is_some() {
+                        tld_type = Tld::CentralWindows;
+                        expectation_is_valid = true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        for (i, candidate) in self.candidates.iter().enumerate() {
+            if encoding == candidate.encoding() {
+                return candidate.score(i, tld_type, expectation_is_valid);
+            }
+        }
+        Some(0)
+    }
 
     const FIRST_NORMAL: usize = 3;
 
