@@ -100,7 +100,7 @@ const CJ_PUNCTUATION: i64 = CJK_BASE_SCORE / 2;
 const CJK_OTHER: i64 = CJK_SECONDARY_BASE_SCORE / 4;
 
 /// Latin letter caseless class
-const LATIN_LETTER: u8 = 2;
+const LATIN_LETTER: u8 = 1;
 
 fn contains_upper_case_period_or_non_ascii(label: &[u8]) -> bool {
     for &b in label.into_iter() {
