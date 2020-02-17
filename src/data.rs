@@ -1212,7 +1212,7 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     },
     SingleByteData {
         encoding: &WINDOWS_1257_INIT,
-        lower: &DETECTOR_DATA.non_latin_ascii,
+        lower: &DETECTOR_DATA.latin_ascii,
         upper: &DETECTOR_DATA.windows_1257,
         probabilities: &DETECTOR_DATA.baltic,
         ascii: BALTIC_ASCII,
@@ -1221,7 +1221,7 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     },
     SingleByteData {
         encoding: &ISO_8859_13_INIT,
-        lower: &DETECTOR_DATA.non_latin_ascii,
+        lower: &DETECTOR_DATA.latin_ascii,
         upper: &DETECTOR_DATA.iso_8859_13,
         probabilities: &DETECTOR_DATA.baltic,
         ascii: BALTIC_ASCII,
@@ -1230,7 +1230,7 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     },
     SingleByteData {
         encoding: &ISO_8859_4_INIT,
-        lower: &DETECTOR_DATA.non_latin_ascii,
+        lower: &DETECTOR_DATA.latin_ascii,
         upper: &DETECTOR_DATA.iso_8859_4,
         probabilities: &DETECTOR_DATA.baltic,
         ascii: BALTIC_ASCII,
