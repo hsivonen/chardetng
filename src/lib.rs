@@ -23,7 +23,6 @@ use encoding_rs::ISO_2022_JP;
 use encoding_rs::ISO_8859_8;
 use encoding_rs::SHIFT_JIS;
 use encoding_rs::UTF_8;
-use encoding_rs::WINDOWS_1252;
 use encoding_rs::WINDOWS_1255;
 
 mod data;
@@ -2574,10 +2573,20 @@ impl EncodingDetector {
 mod tests {
     use super::*;
     use detone::IterDecomposeVietnamese;
+    use encoding_rs::IBM866;
+    use encoding_rs::ISO_8859_2;
+    use encoding_rs::ISO_8859_4;
+    use encoding_rs::ISO_8859_5;
     use encoding_rs::ISO_8859_6;
+    use encoding_rs::ISO_8859_7;
+    use encoding_rs::KOI8_U;
+    use encoding_rs::WINDOWS_1250;
     use encoding_rs::WINDOWS_1251;
+    use encoding_rs::WINDOWS_1252;
     use encoding_rs::WINDOWS_1253;
+    use encoding_rs::WINDOWS_1254;
     use encoding_rs::WINDOWS_1256;
+    use encoding_rs::WINDOWS_1257;
     use encoding_rs::WINDOWS_1258;
     use encoding_rs::WINDOWS_874;
 
@@ -2615,6 +2624,11 @@ mod tests {
     }
 
     #[test]
+    fn test_fi_bis() {
+        check("Tämä", WINDOWS_1252);
+    }
+
+    #[test]
     fn test_pt() {
         check(
             "Este é um teste de codificação de caracteres.",
@@ -2628,13 +2642,59 @@ mod tests {
     }
 
     #[test]
-    fn test_ru() {
+    fn test_ru_short() {
         check("Русский", WINDOWS_1251);
     }
 
     #[test]
-    fn test_el() {
+    fn test_ru() {
+        check("Это тест кодировки символов.", WINDOWS_1251);
+    }
+
+    #[test]
+    fn test_ru_iso() {
+        check("Это тест кодировки символов.", ISO_8859_5);
+    }
+
+    #[test]
+    fn test_ru_ibm() {
+        check("Это тест кодировки символов.", IBM866);
+    }
+
+    #[test]
+    fn test_ru_koi() {
+        check("Это тест кодировки символов.", KOI8_U);
+    }
+
+    #[test]
+    fn test_uk() {
+        check("Це тест на кодування символів.", WINDOWS_1251);
+    }
+
+    #[test]
+    fn test_uk_koi() {
+        check("Це тест на кодування символів.", KOI8_U);
+    }
+
+    #[test]
+    fn test_el_short() {
         check("Ελληνικά", WINDOWS_1253);
+    }
+
+    #[test]
+    fn test_el() {
+        check(
+            "Πρόκειται για δοκιμή κωδικοποίησης χαρακτήρων: Άρης",
+            WINDOWS_1253,
+        );
+    }
+
+    #[test]
+    fn test_el_iso() {
+        check(
+            "Πρόκειται για δοκιμή κωδικοποίησης χαρακτήρων: Άρης",
+            ISO_8859_7,
+        );
     }
 
     #[test]
@@ -2660,6 +2720,11 @@ mod tests {
     #[test]
     fn test_vi() {
         check("Đây là một thử nghiệm mã hóa ký tự.", WINDOWS_1258);
+    }
+
+    #[test]
+    fn test_tr() {
+        check("Bu bir karakter kodlama testidir. Latince karakterleri kullanan bazı dillerde karar vermek için daha fazla girdiye ihtiyacımız var.", WINDOWS_1254);
     }
 
     #[test]
@@ -2713,7 +2778,58 @@ mod tests {
     }
 
     #[test]
-    fn test_foo() {
-        check("Straße", WINDOWS_1252);
+    fn test_it() {
+        check("è", WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_en() {
+        check("isn’t", WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_en_bis() {
+        check("Rock ’n Roll", WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_ca() {
+        check("Codificació de caràcters", WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_et() {
+        check("või", WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_pl_iso() {
+        check("To jest test kodowania znaków. W przypadku niektórych języków, które używają znaków łacińskich, potrzebujemy więcej danych, aby podjąć decyzję.", ISO_8859_2);
+    }
+
+    #[test]
+    fn test_pl() {
+        check("To jest test kodowania znaków. W przypadku niektórych języków, które używają znaków łacińskich, potrzebujemy więcej danych, aby podjąć decyzję.", WINDOWS_1250);
+    }
+
+    #[test]
+    fn test_lt() {
+        check("Tai simbolių kodavimo testas. Kai kurioms kalboms, naudojančioms lotyniškus rašmenis, mums reikia daugiau informacijos, kad galėtume priimti sprendimą.", WINDOWS_1257);
+    }
+
+    // TODO: Detected as ISO-8859-2.
+    // #[test]
+    // fn test_lt_windows_iso_8859_4() {
+    //     check("Tai simbolių kodavimo testas. Kai kurioms kalboms, naudojančioms lotyniškus rašmenis, mums reikia daugiau informacijos, kad galėtume priimti sprendimą.", ISO_8859_4);
+    // }
+
+    #[test]
+    fn test_lv() {
+        check("Šis ir rakstzīmju kodēšanas tests. Dažās valodās, kurās tiek izmantotas latīņu valodas burti, lēmuma pieņemšanai mums ir nepieciešams vairāk ieguldījuma.", WINDOWS_1257);
+    }
+
+    #[test]
+    fn test_lv_iso_8859_4() {
+        check("Šis ir rakstzīmju kodēšanas tests. Dažās valodās, kurās tiek izmantotas latīņu valodas burti, lēmuma pieņemšanai mums ir nepieciešams vairāk ieguldījuma.", ISO_8859_4);
     }
 }
