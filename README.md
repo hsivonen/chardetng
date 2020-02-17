@@ -123,10 +123,12 @@ In general `chardetng` prefers to do negative matching (rule out possibilities f
 
 ### 0.1.4
 
+* Properly take into account non-ASCII bytes at word boundaries for windows-1252. (Especially relevant for Italian and Catalan.)
 * Move Estonian from the Baltic model to the Western model. This improves overall Estonian detection but causes š and ž encoded as windows-1257, ISO-8859-13, or ISO-8859-4 to get misdecoded. (It would be possible to add a post-processing step to adjust for š and ž, but this would cause reloads given the way chardetng is integrated with Firefox.)
 * Properly classify letters that ISO-8859-4 has but windows-1257 doesn't have in order to avoid misdetecting non-ISO-8859-4 input as ISO-8859-4.
 * Improve character classification of windows-1254.
 * Avoid classifying byte 0xA1 or above as space-like.
+* Reduce binary size by collapsing similar character classes.
 
 ### 0.1.3
 
