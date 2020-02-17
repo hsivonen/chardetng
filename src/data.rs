@@ -31,7 +31,6 @@ pub struct DetectorData {
     latin_ascii: [u8; 128],
     non_latin_ascii: [u8; 128],
     turkish_ascii: [u8; 128],
-    hebrew_ascii: [u8; 128],
     windows_1258: [u8; 128],
     windows_1250: [u8; 128],
     iso_8859_2: [u8; 128],
@@ -126,16 +125,6 @@ pub static DETECTOR_DATA: DetectorData = DetectorData {
         143,144,145,146,147,148,149,150,151,152,153,  0,  0,  0,  0,  0,
           0,  1,  2,  3,  4,  5,  6,  7,  8, 27,  9, 10, 11, 12, 13, 14,
          15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,  0,  0,  0,  0,  0,
-    ],
-    hebrew_ascii: [
-          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-          0,129,129,129,129,129,129,129,129,129,129,129,129,129,129,129,
-        129,129,129,129,129,129,129,129,129,129,129,  0,  0,  0,  0,  0,
-          0,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
-          1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  0,  0,  0,  0,  0,
     ],
     windows_1258: [
           0,255,  0, 53,  0,  0,  0,  0,  0,  0,255,  0,155,255,255,255,
@@ -1187,7 +1176,7 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     },
     SingleByteData {
         encoding: &WINDOWS_1255_INIT,
-        lower: &DETECTOR_DATA.hebrew_ascii,
+        lower: &DETECTOR_DATA.non_latin_ascii,
         upper: &DETECTOR_DATA.windows_1255,
         probabilities: &DETECTOR_DATA.hebrew,
         ascii: HEBREW_ASCII,
@@ -1196,7 +1185,7 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     },
     SingleByteData {
         encoding: &ISO_8859_8_INIT,
-        lower: &DETECTOR_DATA.hebrew_ascii,
+        lower: &DETECTOR_DATA.non_latin_ascii,
         upper: &DETECTOR_DATA.iso_8859_8,
         probabilities: &DETECTOR_DATA.hebrew,
         ascii: HEBREW_ASCII,
