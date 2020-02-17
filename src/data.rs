@@ -1068,7 +1068,7 @@ impl PartialEq for SingleByteData {
 pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     SingleByteData {
         encoding: &WINDOWS_1258_INIT,
-        lower: &DETECTOR_DATA.non_latin_ascii,
+        lower: &DETECTOR_DATA.latin_ascii,
         upper: &DETECTOR_DATA.windows_1258,
         probabilities: &DETECTOR_DATA.vietnamese,
         ascii: VIETNAMESE_ASCII,
