@@ -116,13 +116,17 @@ In general `chardetng` prefers to do negative matching (rule out possibilities f
 - [ ] Improve GBK detection for short inputs.
 - [ ] Reorganize the frequency data for telling short GBK, EUC-JP, and EUC-KR inputs apart.
 - [ ] Make Lithuanian and Latvian detection on generic domains a lot more accurate (likely requires looking at trigrams).
-- [ ] Tune Central European detection.
+- [x] Tune Central European detection.
 - [ ] Tune the penalties applied to confusable encodings on non-generic TLDs to make detection of confusable encodings possible on non-generic TLDs.
 - [ ] Reduce the binary size by not storing the scoring for implausible-next-to-alphabetic character classes.
 - [ ] Reduce the binary size by classifying ASCII algorithmically.
 - [ ] Reduce the binary size by not storing the scores for C1 controls.
 
 ## Release Notes
+
+### 0.1.6
+
+* Tune Central European detection.
 
 ### 0.1.5
 
