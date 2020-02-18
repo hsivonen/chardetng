@@ -112,7 +112,7 @@ In general `chardetng` prefers to do negative matching (rule out possibilities f
 ## Roadmap
 
 - [ ] Investigate parallelizing the `feed` method using Rayon.
-- [ ] Improve windows-874 detection for short inputs.
+- [x] Improve windows-874 detection for short inputs.
 - [ ] Improve GBK detection for short inputs.
 - [ ] Reorganize the frequency data for telling short GBK, EUC-JP, and EUC-KR inputs apart.
 - [ ] Make Lithuanian and Latvian detection on generic domains a lot more accurate (likely requires looking at trigrams).
