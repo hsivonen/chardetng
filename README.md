@@ -126,6 +126,8 @@ In general `chardetng` prefers to do negative matching (rule out possibilities f
 
 ### 0.1.5
 
+* Improve Thai accuracy a lot.
+* Improve accuracy of some languages a bit.
 * Remove unused Hebrew ASCII table.
 
 ### 0.1.4
