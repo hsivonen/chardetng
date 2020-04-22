@@ -9,7 +9,7 @@
 
 //! `chardetng` is a character encoding detector for legacy Web content.
 //!
-//! It is optimized for binary size in applicaitons that already depend
+//! It is optimized for binary size in applications that already depend
 //! on `encoding_rs` for other reasons.
 
 use encoding_rs::Decoder;
