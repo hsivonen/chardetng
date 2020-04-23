@@ -173,7 +173,7 @@ impl NonLatinCasedCandidate {
             let ascii = b < 0x80;
             let ascii_pair = self.prev_ascii && ascii;
 
-            let non_ascii_alphabetic = self.data.is_non_latin_alphabetic(caseless_class);
+            let non_ascii_alphabetic = self.data.is_non_latin_alphabetic(caseless_class, false);
 
             // The purpose of this state machine is to avoid misdetecting Greek as
             // Cyrillic by:
@@ -263,12 +263,12 @@ impl NonLatinCasedCandidate {
             }
 
             if !ascii_pair {
-                score += self.data.score(caseless_class, self.prev);
+                score += self.data.score(caseless_class, self.prev, false);
 
                 if self.prev == LATIN_LETTER && non_ascii_alphabetic {
                     score += LATIN_ADJACENCY_PENALTY;
                 } else if caseless_class == LATIN_LETTER
-                    && self.data.is_non_latin_alphabetic(self.prev)
+                    && self.data.is_non_latin_alphabetic(self.prev, false)
                 {
                     score += LATIN_ADJACENCY_PENALTY;
                 }
@@ -349,7 +349,7 @@ impl LatinCandidate {
             }
 
             if !ascii_pair {
-                score += self.data.score(caseless_class, self.prev);
+                score += self.data.score(caseless_class, self.prev, false);
             }
 
             if ascii {
@@ -422,7 +422,7 @@ impl ArabicFrenchCandidate {
             }
 
             // Count only Arabic word length and ignore French
-            let non_ascii_alphabetic = self.data.is_non_latin_alphabetic(caseless_class);
+            let non_ascii_alphabetic = self.data.is_non_latin_alphabetic(caseless_class, true);
             // XXX apply penalty if > 23
             if non_ascii_alphabetic {
                 self.current_word_len += 1;
@@ -434,12 +434,12 @@ impl ArabicFrenchCandidate {
             }
 
             if !ascii_pair {
-                score += self.data.score(caseless_class, self.prev);
+                score += self.data.score(caseless_class, self.prev, true);
 
                 if self.prev == LATIN_LETTER && non_ascii_alphabetic {
                     score += LATIN_ADJACENCY_PENALTY;
                 } else if caseless_class == LATIN_LETTER
-                    && self.data.is_non_latin_alphabetic(self.prev)
+                    && self.data.is_non_latin_alphabetic(self.prev, true)
                 {
                     score += LATIN_ADJACENCY_PENALTY;
                 }
@@ -483,7 +483,7 @@ impl CaselessCandidate {
             let ascii = b < 0x80;
             let ascii_pair = self.prev_ascii && ascii;
 
-            let non_ascii_alphabetic = self.data.is_non_latin_alphabetic(caseless_class);
+            let non_ascii_alphabetic = self.data.is_non_latin_alphabetic(caseless_class, false);
             // Apply penalty if > 23 and not Thai
             if non_ascii_alphabetic {
                 self.current_word_len += 1;
@@ -495,12 +495,12 @@ impl CaselessCandidate {
             }
 
             if !ascii_pair {
-                score += self.data.score(caseless_class, self.prev);
+                score += self.data.score(caseless_class, self.prev, false);
 
                 if self.prev == LATIN_LETTER && non_ascii_alphabetic {
                     score += LATIN_ADJACENCY_PENALTY;
                 } else if caseless_class == LATIN_LETTER
-                    && self.data.is_non_latin_alphabetic(self.prev)
+                    && self.data.is_non_latin_alphabetic(self.prev, false)
                 {
                     score += LATIN_ADJACENCY_PENALTY;
                 }
@@ -553,7 +553,7 @@ impl LogicalCandidate {
             let ascii = b < 0x80;
             let ascii_pair = self.prev_ascii && ascii;
 
-            let non_ascii_alphabetic = self.data.is_non_latin_alphabetic(caseless_class);
+            let non_ascii_alphabetic = self.data.is_non_latin_alphabetic(caseless_class, false);
             // XXX apply penalty if > 22
             if non_ascii_alphabetic {
                 self.current_word_len += 1;
@@ -565,9 +565,9 @@ impl LogicalCandidate {
             }
 
             if !ascii_pair {
-                score += self.data.score(caseless_class, self.prev);
+                score += self.data.score(caseless_class, self.prev, false);
 
-                let prev_non_ascii_alphabetic = self.data.is_non_latin_alphabetic(self.prev);
+                let prev_non_ascii_alphabetic = self.data.is_non_latin_alphabetic(self.prev, false);
                 if caseless_class == 0 && prev_non_ascii_alphabetic && is_ascii_punctuation(b) {
                     self.plausible_punctuation += 1;
                 }
@@ -621,7 +621,7 @@ impl VisualCandidate {
             let ascii = b < 0x80;
             let ascii_pair = self.prev_ascii && ascii;
 
-            let non_ascii_alphabetic = self.data.is_non_latin_alphabetic(caseless_class);
+            let non_ascii_alphabetic = self.data.is_non_latin_alphabetic(caseless_class, false);
             // XXX apply penalty if > 22
             if non_ascii_alphabetic {
                 self.current_word_len += 1;
@@ -633,7 +633,7 @@ impl VisualCandidate {
             }
 
             if !ascii_pair {
-                score += self.data.score(caseless_class, self.prev);
+                score += self.data.score(caseless_class, self.prev, false);
 
                 if non_ascii_alphabetic && self.prev_punctuation {
                     self.plausible_punctuation += 1;
@@ -642,7 +642,7 @@ impl VisualCandidate {
                 if self.prev == LATIN_LETTER && non_ascii_alphabetic {
                     score += LATIN_ADJACENCY_PENALTY;
                 } else if caseless_class == LATIN_LETTER
-                    && self.data.is_non_latin_alphabetic(self.prev)
+                    && self.data.is_non_latin_alphabetic(self.prev, false)
                 {
                     score += LATIN_ADJACENCY_PENALTY;
                 }
