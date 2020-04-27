@@ -147,6 +147,8 @@ struct NonLatinCasedCandidate {
     prev_ascii: bool,
     current_word_len: u64,
     longest_word: u64,
+    ibm866: bool,
+    prev_was_a0: bool, // Only used with IBM866
 }
 
 impl NonLatinCasedCandidate {
@@ -158,6 +160,8 @@ impl NonLatinCasedCandidate {
             prev_ascii: true,
             current_word_len: 0,
             longest_word: 0,
+            ibm866: data == &SINGLE_BYTE_DATA[IBM866_INDEX],
+            prev_was_a0: false,
         }
     }
 
@@ -262,8 +266,17 @@ impl NonLatinCasedCandidate {
                 self.current_word_len = 0;
             }
 
+            let is_a0 = b == 0xA0;
             if !ascii_pair {
-                score += self.data.score(caseless_class, self.prev, false);
+                // 0xA0 is no-break space in many other encodings, so avoid
+                // assigning score to IBM866 when 0xA0 occurs next to itself
+                // or a space-like byte.
+                if !(self.ibm866
+                    && ((is_a0 && (self.prev_was_a0 || self.prev == 0))
+                        || caseless_class == 0 && self.prev_was_a0))
+                {
+                    score += self.data.score(caseless_class, self.prev, false);
+                }
 
                 if self.prev == LATIN_LETTER && non_ascii_alphabetic {
                     score += LATIN_ADJACENCY_PENALTY;
@@ -276,6 +289,7 @@ impl NonLatinCasedCandidate {
 
             self.prev_ascii = ascii;
             self.prev = caseless_class;
+            self.prev_was_a0 = is_a0;
         }
         Some(score)
     }
@@ -2831,5 +2845,11 @@ mod tests {
     #[test]
     fn test_lv_iso_8859_4() {
         check("Šis ir rakstzīmju kodēšanas tests. Dažās valodās, kurās tiek izmantotas latīņu valodas burti, lēmuma pieņemšanai mums ir nepieciešams vairāk ieguldījuma.", ISO_8859_4);
+    }
+
+    #[test]
+    fn test_a0() {
+        // Test that this isn't IBM866. TODO: What about GBK with fully paired 0xA0?
+        check("\u{A0}\u{A0} \u{A0}", WINDOWS_1252);
     }
 }
