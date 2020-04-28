@@ -37,6 +37,14 @@ const PLAUSIBLE_NEXT_TO_ASCII_ALPHABETIC_ON_EITHER_SIDE: usize = 5;
 
 const WINDOWS_1256_ZWNJ: usize = 2;
 
+#[derive(PartialEq, Eq)]
+pub enum SingleByteEncodingType {
+    Windows1256,
+    Windows1254,
+    OtherLatin,
+    OtherNonLatin,
+}
+
 #[repr(align(64))] // Align to cache lines
 pub struct DetectorData {
     pub frequent_simplified: [u16; 128],
@@ -979,11 +987,33 @@ pub struct SingleByteData {
 
 impl SingleByteData {
     #[inline(always)]
-    pub fn classify(&'static self, byte: u8) -> u8 {
+    pub fn classify(&'static self, byte: u8, encoding_type: SingleByteEncodingType) -> u8 {
         let high = byte >> 7;
         let low = byte & 0x7F;
         if high == 0u8 {
-            self.lower[usize::from(low)]
+            match encoding_type {
+                SingleByteEncodingType::OtherNonLatin | SingleByteEncodingType::Windows1256 => {
+                    match byte {
+                        b'a'..=b'z' => 1,
+                        b'A'..=b'Z' => 129,
+                        _ => 0,
+                    }
+                }
+                SingleByteEncodingType::OtherLatin => match byte {
+                    b'a'..=b'z' => byte - 0x60,
+                    b'A'..=b'Z' => byte + (128 - 0x40),
+                    _ => 0,
+                },
+                SingleByteEncodingType::Windows1254 => match byte {
+                    b'a'..=b'h' => byte - 0x60,
+                    b'i' => 27,
+                    b'j'..=b'z' => byte - 0x61,
+                    b'A'..=b'H' => byte + (128 - 0x40),
+                    b'I' => 154,
+                    b'J'..=b'Z' => byte + (128 - 0x41),
+                    _ => 0,
+                },
+            }
         } else {
             self.upper[usize::from(low)]
         }
@@ -999,10 +1029,10 @@ impl SingleByteData {
     pub fn is_non_latin_alphabetic(
         &'static self,
         caseless_class: u8,
-        is_windows_1256: bool,
+        encoding_type: SingleByteEncodingType,
     ) -> bool {
         let caseless_class_usize = usize::from(caseless_class);
-        let lower_bound = if is_windows_1256 {
+        let lower_bound = if encoding_type == SingleByteEncodingType::Windows1256 {
             WINDOWS_1256_ZWNJ
         } else {
             1
@@ -1015,7 +1045,7 @@ impl SingleByteData {
         &'static self,
         current_class: u8,
         previous_class: u8,
-        is_windows_1256: bool,
+        encoding_type: SingleByteEncodingType,
     ) -> i64 {
         let current_usize = usize::from(current_class);
         let previous_usize = usize::from(previous_class);
@@ -1037,7 +1067,10 @@ impl SingleByteData {
                 }
             } else {
                 // Current below stored, prev above
-                if current_usize == 0 || (is_windows_1256 && current_usize == WINDOWS_1256_ZWNJ) {
+                if current_usize == 0
+                    || (encoding_type == SingleByteEncodingType::Windows1256
+                        && current_usize == WINDOWS_1256_ZWNJ)
+                {
                     // Current is space-like
                     0
                 } else {
@@ -1071,7 +1104,10 @@ impl SingleByteData {
         } else {
             if previous_usize < stored_boundary {
                 // Current above, prev below
-                if previous_usize == 0 || (is_windows_1256 && previous_usize == WINDOWS_1256_ZWNJ) {
+                if previous_usize == 0
+                    || (encoding_type == SingleByteEncodingType::Windows1256
+                        && previous_usize == WINDOWS_1256_ZWNJ)
+                {
                     // Previous is space-like
                     0
                 } else {

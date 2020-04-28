@@ -168,7 +168,7 @@ impl NonLatinCasedCandidate {
     fn feed(&mut self, buffer: &[u8]) -> Option<i64> {
         let mut score = 0i64;
         for &b in buffer {
-            let class = self.data.classify(b);
+            let class = self.data.classify(b, SingleByteEncodingType::OtherNonLatin);
             if class == 255 {
                 return None;
             }
@@ -177,7 +177,9 @@ impl NonLatinCasedCandidate {
             let ascii = b < 0x80;
             let ascii_pair = self.prev_ascii && ascii;
 
-            let non_ascii_alphabetic = self.data.is_non_latin_alphabetic(caseless_class, false);
+            let non_ascii_alphabetic = self
+                .data
+                .is_non_latin_alphabetic(caseless_class, SingleByteEncodingType::OtherNonLatin);
 
             // The purpose of this state machine is to avoid misdetecting Greek as
             // Cyrillic by:
@@ -275,13 +277,19 @@ impl NonLatinCasedCandidate {
                     && ((is_a0 && (self.prev_was_a0 || self.prev == 0))
                         || caseless_class == 0 && self.prev_was_a0))
                 {
-                    score += self.data.score(caseless_class, self.prev, false);
+                    score += self.data.score(
+                        caseless_class,
+                        self.prev,
+                        SingleByteEncodingType::OtherNonLatin,
+                    );
                 }
 
                 if self.prev == LATIN_LETTER && non_ascii_alphabetic {
                     score += LATIN_ADJACENCY_PENALTY;
                 } else if caseless_class == LATIN_LETTER
-                    && self.data.is_non_latin_alphabetic(self.prev, false)
+                    && self
+                        .data
+                        .is_non_latin_alphabetic(self.prev, SingleByteEncodingType::OtherNonLatin)
                 {
                     score += LATIN_ADJACENCY_PENALTY;
                 }
@@ -295,27 +303,49 @@ impl NonLatinCasedCandidate {
     }
 }
 
-struct LatinCandidate {
+trait LatinKind {
+    fn encoding_type() -> SingleByteEncodingType;
+}
+
+struct Turkish;
+
+struct NonTurkish;
+
+impl LatinKind for Turkish {
+    fn encoding_type() -> SingleByteEncodingType {
+        SingleByteEncodingType::Windows1254
+    }
+}
+
+impl LatinKind for NonTurkish {
+    fn encoding_type() -> SingleByteEncodingType {
+        SingleByteEncodingType::OtherLatin
+    }
+}
+
+struct LatinCandidate<T: LatinKind> {
     data: &'static SingleByteData,
     prev: u8,
     case_state: LatinCaseState,
     prev_non_ascii: u32,
+    phantom: std::marker::PhantomData<T>,
 }
 
-impl LatinCandidate {
+impl<T: LatinKind> LatinCandidate<T> {
     fn new(data: &'static SingleByteData) -> Self {
         LatinCandidate {
             data: data,
             prev: 0,
             case_state: LatinCaseState::Space,
             prev_non_ascii: 0,
+            phantom: std::marker::PhantomData,
         }
     }
 
     fn feed(&mut self, buffer: &[u8]) -> Option<i64> {
         let mut score = 0i64;
         for &b in buffer {
-            let class = self.data.classify(b);
+            let class = self.data.classify(b, T::encoding_type());
             if class == 255 {
                 return None;
             }
@@ -363,7 +393,9 @@ impl LatinCandidate {
             }
 
             if !ascii_pair {
-                score += self.data.score(caseless_class, self.prev, false);
+                score += self
+                    .data
+                    .score(caseless_class, self.prev, T::encoding_type());
             }
 
             if ascii {
@@ -401,7 +433,7 @@ impl ArabicFrenchCandidate {
     fn feed(&mut self, buffer: &[u8]) -> Option<i64> {
         let mut score = 0i64;
         for &b in buffer {
-            let class = self.data.classify(b);
+            let class = self.data.classify(b, SingleByteEncodingType::Windows1256);
             if class == 255 {
                 return None;
             }
@@ -436,7 +468,9 @@ impl ArabicFrenchCandidate {
             }
 
             // Count only Arabic word length and ignore French
-            let non_ascii_alphabetic = self.data.is_non_latin_alphabetic(caseless_class, true);
+            let non_ascii_alphabetic = self
+                .data
+                .is_non_latin_alphabetic(caseless_class, SingleByteEncodingType::Windows1256);
             // XXX apply penalty if > 23
             if non_ascii_alphabetic {
                 self.current_word_len += 1;
@@ -448,12 +482,18 @@ impl ArabicFrenchCandidate {
             }
 
             if !ascii_pair {
-                score += self.data.score(caseless_class, self.prev, true);
+                score += self.data.score(
+                    caseless_class,
+                    self.prev,
+                    SingleByteEncodingType::Windows1256,
+                );
 
                 if self.prev == LATIN_LETTER && non_ascii_alphabetic {
                     score += LATIN_ADJACENCY_PENALTY;
                 } else if caseless_class == LATIN_LETTER
-                    && self.data.is_non_latin_alphabetic(self.prev, true)
+                    && self
+                        .data
+                        .is_non_latin_alphabetic(self.prev, SingleByteEncodingType::Windows1256)
                 {
                     score += LATIN_ADJACENCY_PENALTY;
                 }
@@ -488,7 +528,7 @@ impl CaselessCandidate {
     fn feed(&mut self, buffer: &[u8]) -> Option<i64> {
         let mut score = 0i64;
         for &b in buffer {
-            let class = self.data.classify(b);
+            let class = self.data.classify(b, SingleByteEncodingType::OtherNonLatin);
             if class == 255 {
                 return None;
             }
@@ -497,7 +537,9 @@ impl CaselessCandidate {
             let ascii = b < 0x80;
             let ascii_pair = self.prev_ascii && ascii;
 
-            let non_ascii_alphabetic = self.data.is_non_latin_alphabetic(caseless_class, false);
+            let non_ascii_alphabetic = self
+                .data
+                .is_non_latin_alphabetic(caseless_class, SingleByteEncodingType::OtherNonLatin);
             // Apply penalty if > 23 and not Thai
             if non_ascii_alphabetic {
                 self.current_word_len += 1;
@@ -509,12 +551,18 @@ impl CaselessCandidate {
             }
 
             if !ascii_pair {
-                score += self.data.score(caseless_class, self.prev, false);
+                score += self.data.score(
+                    caseless_class,
+                    self.prev,
+                    SingleByteEncodingType::OtherNonLatin,
+                );
 
                 if self.prev == LATIN_LETTER && non_ascii_alphabetic {
                     score += LATIN_ADJACENCY_PENALTY;
                 } else if caseless_class == LATIN_LETTER
-                    && self.data.is_non_latin_alphabetic(self.prev, false)
+                    && self
+                        .data
+                        .is_non_latin_alphabetic(self.prev, SingleByteEncodingType::OtherNonLatin)
                 {
                     score += LATIN_ADJACENCY_PENALTY;
                 }
@@ -558,7 +606,7 @@ impl LogicalCandidate {
     fn feed(&mut self, buffer: &[u8]) -> Option<i64> {
         let mut score = 0i64;
         for &b in buffer {
-            let class = self.data.classify(b);
+            let class = self.data.classify(b, SingleByteEncodingType::OtherNonLatin);
             if class == 255 {
                 return None;
             }
@@ -567,7 +615,9 @@ impl LogicalCandidate {
             let ascii = b < 0x80;
             let ascii_pair = self.prev_ascii && ascii;
 
-            let non_ascii_alphabetic = self.data.is_non_latin_alphabetic(caseless_class, false);
+            let non_ascii_alphabetic = self
+                .data
+                .is_non_latin_alphabetic(caseless_class, SingleByteEncodingType::OtherNonLatin);
             // XXX apply penalty if > 22
             if non_ascii_alphabetic {
                 self.current_word_len += 1;
@@ -579,9 +629,15 @@ impl LogicalCandidate {
             }
 
             if !ascii_pair {
-                score += self.data.score(caseless_class, self.prev, false);
+                score += self.data.score(
+                    caseless_class,
+                    self.prev,
+                    SingleByteEncodingType::OtherNonLatin,
+                );
 
-                let prev_non_ascii_alphabetic = self.data.is_non_latin_alphabetic(self.prev, false);
+                let prev_non_ascii_alphabetic = self
+                    .data
+                    .is_non_latin_alphabetic(self.prev, SingleByteEncodingType::OtherNonLatin);
                 if caseless_class == 0 && prev_non_ascii_alphabetic && is_ascii_punctuation(b) {
                     self.plausible_punctuation += 1;
                 }
@@ -626,7 +682,7 @@ impl VisualCandidate {
     fn feed(&mut self, buffer: &[u8]) -> Option<i64> {
         let mut score = 0i64;
         for &b in buffer {
-            let class = self.data.classify(b);
+            let class = self.data.classify(b, SingleByteEncodingType::OtherNonLatin);
             if class == 255 {
                 return None;
             }
@@ -635,7 +691,9 @@ impl VisualCandidate {
             let ascii = b < 0x80;
             let ascii_pair = self.prev_ascii && ascii;
 
-            let non_ascii_alphabetic = self.data.is_non_latin_alphabetic(caseless_class, false);
+            let non_ascii_alphabetic = self
+                .data
+                .is_non_latin_alphabetic(caseless_class, SingleByteEncodingType::OtherNonLatin);
             // XXX apply penalty if > 22
             if non_ascii_alphabetic {
                 self.current_word_len += 1;
@@ -647,7 +705,11 @@ impl VisualCandidate {
             }
 
             if !ascii_pair {
-                score += self.data.score(caseless_class, self.prev, false);
+                score += self.data.score(
+                    caseless_class,
+                    self.prev,
+                    SingleByteEncodingType::OtherNonLatin,
+                );
 
                 if non_ascii_alphabetic && self.prev_punctuation {
                     self.plausible_punctuation += 1;
@@ -656,7 +718,9 @@ impl VisualCandidate {
                 if self.prev == LATIN_LETTER && non_ascii_alphabetic {
                     score += LATIN_ADJACENCY_PENALTY;
                 } else if caseless_class == LATIN_LETTER
-                    && self.data.is_non_latin_alphabetic(self.prev, false)
+                    && self
+                        .data
+                        .is_non_latin_alphabetic(self.prev, SingleByteEncodingType::OtherNonLatin)
                 {
                     score += LATIN_ADJACENCY_PENALTY;
                 }
@@ -1483,7 +1547,8 @@ impl EucKrCandidate {
 }
 
 enum InnerCandidate {
-    Latin(LatinCandidate),
+    Latin(LatinCandidate<NonTurkish>),
+    Turkish(LatinCandidate<Turkish>),
     NonLatinCased(NonLatinCasedCandidate),
     Caseless(CaselessCandidate),
     ArabicFrench(ArabicFrenchCandidate),
@@ -1502,6 +1567,22 @@ impl InnerCandidate {
     fn feed(&mut self, buffer: &[u8], last: bool) -> Option<i64> {
         match self {
             InnerCandidate::Latin(c) => {
+                if let Some(new_score) = c.feed(buffer) {
+                    if last {
+                        // Treat EOF as space-like
+                        if let Some(additional_score) = c.feed(b" ") {
+                            Some(new_score + additional_score)
+                        } else {
+                            None
+                        }
+                    } else {
+                        Some(new_score)
+                    }
+                } else {
+                    None
+                }
+            }
+            InnerCandidate::Turkish(c) => {
                 if let Some(new_score) = c.feed(buffer) {
                     if last {
                         // Treat EOF as space-like
@@ -1990,7 +2071,14 @@ impl Candidate {
 
     fn new_latin(data: &'static SingleByteData) -> Self {
         Candidate {
-            inner: InnerCandidate::Latin(LatinCandidate::new(data)),
+            inner: InnerCandidate::Latin(LatinCandidate::<NonTurkish>::new(data)),
+            score: Some(0),
+        }
+    }
+
+    fn new_turkish(data: &'static SingleByteData) -> Self {
+        Candidate {
+            inner: InnerCandidate::Turkish(LatinCandidate::<Turkish>::new(data)),
             score: Some(0),
         }
     }
@@ -2179,6 +2267,9 @@ impl Candidate {
     fn encoding(&self) -> &'static Encoding {
         match &self.inner {
             InnerCandidate::Latin(c) => {
+                return c.data.encoding;
+            }
+            InnerCandidate::Turkish(c) => {
                 return c.data.encoding;
             }
             InnerCandidate::NonLatinCased(c) => {
@@ -2561,7 +2652,7 @@ impl EncodingDetector {
                 Candidate::new_latin(&SINGLE_BYTE_DATA[ISO_8859_2_INDEX]),             // 11
                 Candidate::new_arabic_french(&SINGLE_BYTE_DATA[WINDOWS_1256_INDEX]),   // 12
                 Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1252_ICELANDIC_INDEX]), // 13
-                Candidate::new_latin(&SINGLE_BYTE_DATA[WINDOWS_1254_INDEX]),           // 14
+                Candidate::new_turkish(&SINGLE_BYTE_DATA[WINDOWS_1254_INDEX]),         // 14
                 Candidate::new_caseless(&SINGLE_BYTE_DATA[WINDOWS_874_INDEX]),         // 15
                 Candidate::new_logical(&SINGLE_BYTE_DATA[WINDOWS_1255_INDEX]),         // 16
                 Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[WINDOWS_1253_INDEX]), // 17
