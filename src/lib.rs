@@ -362,7 +362,15 @@ impl LatinCandidate {
                 }
             }
 
-            if !ascii_pair {
+            // Treat pairing space-like, which can be non-ASCII, with ASCII as
+            // ASCIIish enough not to get a score in order to avoid giving
+            // ASCII i and I in windows-1254 next to windows-125x apostrophe/quote
+            // a score. This avoids detecting English I’ as Turkish.
+            let ascii_ish_pair = ascii_pair
+                || (ascii && self.prev == 0)
+                || (caseless_class == 0 && self.prev_non_ascii == 0);
+
+            if !ascii_ish_pair {
                 score += self.data.score(caseless_class, self.prev, false);
             }
 
@@ -2621,6 +2629,14 @@ mod tests {
         let (decoded, _) = enc.decode_without_bom_handling(&bytes);
         println!("{:?}", decoded);
         assert_eq!(enc, encoding);
+    }
+
+    #[test]
+    fn test_i_apostrophe() {
+        let mut det = EncodingDetector::new();
+        det.feed(b"I\x92", true);
+        let enc = det.guess(None, false);
+        assert_eq!(enc, WINDOWS_1252);
     }
 
     #[test]
