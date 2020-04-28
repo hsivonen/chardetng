@@ -37,6 +37,8 @@ const PLAUSIBLE_NEXT_TO_ASCII_ALPHABETIC_ON_EITHER_SIDE: usize = 5;
 
 const WINDOWS_1256_ZWNJ: usize = 2;
 
+const ASCII_DIGIT: usize = 100;
+
 #[repr(align(64))] // Align to cache lines
 pub struct DetectorData {
     pub frequent_simplified: [u16; 128],
@@ -114,7 +116,7 @@ pub static DETECTOR_DATA: DetectorData = DetectorData {
           0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
           0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
           0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+        100,100,100,100,100,100,100,100,100,100,  0,  0,  0,  0,  0,  0,
           0,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,
         144,145,146,147,148,149,150,151,152,153,154,  0,  0,  0,  0,  0,
           0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15,
@@ -124,7 +126,7 @@ pub static DETECTOR_DATA: DetectorData = DetectorData {
           0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
           0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
           0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+        100,100,100,100,100,100,100,100,100,100,  0,  0,  0,  0,  0,  0,
           0,129,129,129,129,129,129,129,129,129,129,129,129,129,129,129,
         129,129,129,129,129,129,129,129,129,129,129,  0,  0,  0,  0,  0,
           0,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
@@ -134,7 +136,7 @@ pub static DETECTOR_DATA: DetectorData = DetectorData {
           0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
           0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
           0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+        100,100,100,100,100,100,100,100,100,100,  0,  0,  0,  0,  0,  0,
           0,129,130,131,132,133,134,135,136,154,137,138,139,140,141,142,
         143,144,145,146,147,148,149,150,151,152,153,  0,  0,  0,  0,  0,
           0,  1,  2,  3,  4,  5,  6,  7,  8, 27,  9, 10, 11, 12, 13, 14,
@@ -1037,7 +1039,10 @@ impl SingleByteData {
                 }
             } else {
                 // Current below stored, prev above
-                if current_usize == 0 || (is_windows_1256 && current_usize == WINDOWS_1256_ZWNJ) {
+                if current_usize == 0
+                    || current_usize == ASCII_DIGIT
+                    || (is_windows_1256 && current_usize == WINDOWS_1256_ZWNJ)
+                {
                     // Current is space-like
                     0
                 } else {
@@ -1063,7 +1068,8 @@ impl SingleByteData {
                             }
                         }
                         _ => {
-                            unreachable!();
+                            debug_assert_eq!(previous_usize, ASCII_DIGIT);
+                            0
                         }
                     }
                 }
@@ -1071,7 +1077,10 @@ impl SingleByteData {
         } else {
             if previous_usize < stored_boundary {
                 // Current above, prev below
-                if previous_usize == 0 || (is_windows_1256 && previous_usize == WINDOWS_1256_ZWNJ) {
+                if previous_usize == 0
+                    || previous_usize == ASCII_DIGIT
+                    || (is_windows_1256 && previous_usize == WINDOWS_1256_ZWNJ)
+                {
                     // Previous is space-like
                     0
                 } else {
@@ -1097,7 +1106,8 @@ impl SingleByteData {
                             }
                         }
                         _ => {
-                            unreachable!();
+                            debug_assert_eq!(current_usize, ASCII_DIGIT);
+                            0
                         }
                     }
                 }
