@@ -50,9 +50,6 @@ pub struct DetectorData {
     pub frequent_simplified: [u16; 128],
     pub frequent_kanji: [u16; 128],
     pub frequent_hangul: [u16; 128],
-    latin_ascii: [u8; 128],
-    non_latin_ascii: [u8; 128],
-    turkish_ascii: [u8; 128],
     windows_1258: [u8; 128],
     windows_1250: [u8; 128],
     iso_8859_2: [u8; 128],
@@ -117,36 +114,6 @@ pub static DETECTOR_DATA: DetectorData = DetectorData {
         0xB974, 0xC720, 0xC2E0, 0xD0A4, 0xC911, 0xACC4, 0xD0C0, 0xC5F0, 0xD504, 0xAD00, 0xB418, 0xC801, 0xCE58, 0xB808, 0xCE74, 0xC9C4, 
         0xC640, 0xD130, 0xB4E4, 0xBAA9, 0xACA8, 0xAC8C, 0xAC1C, 0xBC29, 0xD30C, 0xC0B0, 0xD638, 0xCD9C, 0xC74C, 0xB9BC, 0xBA74, 0xC791, 
         0xB9CC, 0xB2E8, 0xB118, 0xBAA8, 0xC694, 0xC5C8, 0xC0DD, 0xB0A8, 0xC7AC, 0xBB34, 0xD6C4, 0xD45C, 0xAD70, 0xD3EC, 0xB2F9, 0xB178, 
-    ],
-    latin_ascii: [
-          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-          0,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,
-        144,145,146,147,148,149,150,151,152,153,154,  0,  0,  0,  0,  0,
-          0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15,
-         16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,  0,  0,  0,  0,  0,
-    ],
-    non_latin_ascii: [
-          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-          0,129,129,129,129,129,129,129,129,129,129,129,129,129,129,129,
-        129,129,129,129,129,129,129,129,129,129,129,  0,  0,  0,  0,  0,
-          0,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
-          1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  0,  0,  0,  0,  0,
-    ],
-    turkish_ascii: [
-          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-          0,129,130,131,132,133,134,135,136,154,137,138,139,140,141,142,
-        143,144,145,146,147,148,149,150,151,152,153,  0,  0,  0,  0,  0,
-          0,  1,  2,  3,  4,  5,  6,  7,  8, 27,  9, 10, 11, 12, 13, 14,
-         15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,  0,  0,  0,  0,  0,
     ],
     windows_1258: [
           0,255,  0, 53,  0,  0,  0,  0,  0,  0,255,  0,155,255,255,255,
@@ -978,7 +945,6 @@ fn compute_index(
 
 pub struct SingleByteData {
     pub encoding: &'static Encoding,
-    lower: &'static [u8; 128],
     upper: &'static [u8; 128],
     probabilities: &'static [u8],
     ascii: usize,
@@ -1155,7 +1121,6 @@ impl PartialEq for SingleByteData {
 pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     SingleByteData {
         encoding: &WINDOWS_1258_INIT,
-        lower: &DETECTOR_DATA.latin_ascii,
         upper: &DETECTOR_DATA.windows_1258,
         probabilities: &DETECTOR_DATA.vietnamese,
         ascii: VIETNAMESE_ASCII,
@@ -1163,7 +1128,6 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     },
     SingleByteData {
         encoding: &WINDOWS_1250_INIT,
-        lower: &DETECTOR_DATA.latin_ascii,
         upper: &DETECTOR_DATA.windows_1250,
         probabilities: &DETECTOR_DATA.central,
         ascii: CENTRAL_ASCII,
@@ -1171,7 +1135,6 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     },
     SingleByteData {
         encoding: &ISO_8859_2_INIT,
-        lower: &DETECTOR_DATA.latin_ascii,
         upper: &DETECTOR_DATA.iso_8859_2,
         probabilities: &DETECTOR_DATA.central,
         ascii: CENTRAL_ASCII,
@@ -1179,7 +1142,6 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     },
     SingleByteData {
         encoding: &WINDOWS_1251_INIT,
-        lower: &DETECTOR_DATA.non_latin_ascii,
         upper: &DETECTOR_DATA.windows_1251,
         probabilities: &DETECTOR_DATA.cyrillic,
         ascii: CYRILLIC_ASCII,
@@ -1187,7 +1149,6 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     },
     SingleByteData {
         encoding: &KOI8_U_INIT,
-        lower: &DETECTOR_DATA.non_latin_ascii,
         upper: &DETECTOR_DATA.koi8_u,
         probabilities: &DETECTOR_DATA.cyrillic,
         ascii: CYRILLIC_ASCII,
@@ -1195,7 +1156,6 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     },
     SingleByteData {
         encoding: &ISO_8859_5_INIT,
-        lower: &DETECTOR_DATA.non_latin_ascii,
         upper: &DETECTOR_DATA.iso_8859_5,
         probabilities: &DETECTOR_DATA.cyrillic,
         ascii: CYRILLIC_ASCII,
@@ -1203,7 +1163,6 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     },
     SingleByteData {
         encoding: &IBM866_INIT,
-        lower: &DETECTOR_DATA.non_latin_ascii,
         upper: &DETECTOR_DATA.ibm866,
         probabilities: &DETECTOR_DATA.cyrillic,
         ascii: CYRILLIC_ASCII,
@@ -1211,7 +1170,6 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     },
     SingleByteData {
         encoding: &WINDOWS_1252_INIT,
-        lower: &DETECTOR_DATA.latin_ascii,
         upper: &DETECTOR_DATA.windows_1252,
         probabilities: &DETECTOR_DATA.western,
         ascii: WESTERN_ASCII,
@@ -1219,7 +1177,6 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     },
     SingleByteData {
         encoding: &WINDOWS_1252_INIT,
-        lower: &DETECTOR_DATA.latin_ascii,
         upper: &DETECTOR_DATA.windows_1252_icelandic,
         probabilities: &DETECTOR_DATA.icelandic,
         ascii: ICELANDIC_ASCII,
@@ -1227,7 +1184,6 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     },
     SingleByteData {
         encoding: &WINDOWS_1253_INIT,
-        lower: &DETECTOR_DATA.non_latin_ascii,
         upper: &DETECTOR_DATA.windows_1253,
         probabilities: &DETECTOR_DATA.greek,
         ascii: GREEK_ASCII,
@@ -1235,7 +1191,6 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     },
     SingleByteData {
         encoding: &ISO_8859_7_INIT,
-        lower: &DETECTOR_DATA.non_latin_ascii,
         upper: &DETECTOR_DATA.iso_8859_7,
         probabilities: &DETECTOR_DATA.greek,
         ascii: GREEK_ASCII,
@@ -1243,7 +1198,6 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     },
     SingleByteData {
         encoding: &WINDOWS_1254_INIT,
-        lower: &DETECTOR_DATA.turkish_ascii,
         upper: &DETECTOR_DATA.windows_1254,
         probabilities: &DETECTOR_DATA.turkish,
         ascii: TURKISH_ASCII,
@@ -1251,7 +1205,6 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     },
     SingleByteData {
         encoding: &WINDOWS_1255_INIT,
-        lower: &DETECTOR_DATA.non_latin_ascii,
         upper: &DETECTOR_DATA.windows_1255,
         probabilities: &DETECTOR_DATA.hebrew,
         ascii: HEBREW_ASCII,
@@ -1259,7 +1212,6 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     },
     SingleByteData {
         encoding: &ISO_8859_8_INIT,
-        lower: &DETECTOR_DATA.non_latin_ascii,
         upper: &DETECTOR_DATA.iso_8859_8,
         probabilities: &DETECTOR_DATA.hebrew,
         ascii: HEBREW_ASCII,
@@ -1267,7 +1219,6 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     },
     SingleByteData {
         encoding: &WINDOWS_1256_INIT,
-        lower: &DETECTOR_DATA.non_latin_ascii,
         upper: &DETECTOR_DATA.windows_1256,
         probabilities: &DETECTOR_DATA.arabic,
         ascii: ARABIC_ASCII,
@@ -1275,7 +1226,6 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     },
     SingleByteData {
         encoding: &ISO_8859_6_INIT,
-        lower: &DETECTOR_DATA.non_latin_ascii,
         upper: &DETECTOR_DATA.iso_8859_6,
         probabilities: &DETECTOR_DATA.arabic,
         ascii: ARABIC_ASCII,
@@ -1283,7 +1233,6 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     },
     SingleByteData {
         encoding: &WINDOWS_1257_INIT,
-        lower: &DETECTOR_DATA.latin_ascii,
         upper: &DETECTOR_DATA.windows_1257,
         probabilities: &DETECTOR_DATA.baltic,
         ascii: BALTIC_ASCII,
@@ -1291,7 +1240,6 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     },
     SingleByteData {
         encoding: &ISO_8859_13_INIT,
-        lower: &DETECTOR_DATA.latin_ascii,
         upper: &DETECTOR_DATA.iso_8859_13,
         probabilities: &DETECTOR_DATA.baltic,
         ascii: BALTIC_ASCII,
@@ -1299,7 +1247,6 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     },
     SingleByteData {
         encoding: &ISO_8859_4_INIT,
-        lower: &DETECTOR_DATA.latin_ascii,
         upper: &DETECTOR_DATA.iso_8859_4,
         probabilities: &DETECTOR_DATA.baltic,
         ascii: BALTIC_ASCII,
@@ -1307,7 +1254,6 @@ pub static SINGLE_BYTE_DATA: [SingleByteData; 20] = [
     },
     SingleByteData {
         encoding: &WINDOWS_874_INIT,
-        lower: &DETECTOR_DATA.non_latin_ascii,
         upper: &DETECTOR_DATA.windows_874,
         probabilities: &DETECTOR_DATA.thai,
         ascii: THAI_ASCII,
