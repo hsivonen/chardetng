@@ -35,6 +35,8 @@ const LATIN_ADJACENCY_PENALTY: i64 = -50;
 
 const IMPLAUSIBILITY_PENALTY: i64 = -220;
 
+const ORDINAL_BONUS: i64 = 300;
+
 const IMPLAUSIBLE_LATIN_CASE_TRANSITION_PENALTY: i64 = -180;
 
 const NON_LATIN_CAPITALIZATION_BONUS: i64 = 40;
@@ -295,11 +297,28 @@ impl NonLatinCasedCandidate {
     }
 }
 
+enum OrdinalState {
+    Other,
+    Space,
+    PeriodAfterN,
+    OrdinalExpectingSpace,
+    OrdinalExpectingSpaceUndoImplausibility,
+    OrdinalExpectingSpaceOrDigit,
+    OrdinalExpectingSpaceOrDigitUndoImplausibily,
+    UpperN,
+    LowerN,
+    FeminineAbbreviationStartLetter,
+    Digit,
+    Roman,
+}
+
 struct LatinCandidate {
     data: &'static SingleByteData,
     prev: u8,
     case_state: LatinCaseState,
     prev_non_ascii: u32,
+    ordinal_state: OrdinalState, // Used only when `windows1252 == true`
+    windows1252: bool,
 }
 
 impl LatinCandidate {
@@ -309,6 +328,8 @@ impl LatinCandidate {
             prev: 0,
             case_state: LatinCaseState::Space,
             prev_non_ascii: 0,
+            ordinal_state: OrdinalState::Space,
+            windows1252: data == &SINGLE_BYTE_DATA[WINDOWS_1252_INDEX],
         }
     }
 
@@ -372,6 +393,169 @@ impl LatinCandidate {
 
             if !ascii_ish_pair {
                 score += self.data.score(caseless_class, self.prev, false);
+            }
+
+            if self.windows1252 {
+                // This state machine assigns score to the sequences
+                // * " º " (Spanish)
+                // * " ª " (Spanish)
+                // * ".ª " (Spanish)
+                // * ".º " (Spanish)
+                // * "n.º1" (Spanish)
+                // * " Mª " (Spanish)
+                // * " Dª " (Spanish)
+                // * " Nª " (Spanish)
+                // * " Sª " (Spanish)
+                // * " 3º " (Italian, where 3 is an ASCII digit)
+                // * " 3ª " (Italian, where 3 is an ASCII digit)
+                // * " Xº " (Italian, where X is a small Roman numeral)
+                // * " Xª " (Italian, where X is a small Roman numeral)
+                // * " Nº1" (Italian, where 1 is an ASCII digit)
+                // * " Nº " (Italian)
+                // which are problematic to deal with by pairwise scoring
+                // without messing up Romanian detection.
+                // Initial sc
+                match self.ordinal_state {
+                    OrdinalState::Other => {
+                        if caseless_class == 0 {
+                            self.ordinal_state = OrdinalState::Space;
+                        }
+                    }
+                    OrdinalState::Space => {
+                        if caseless_class == 0 {
+                            // pass
+                        } else if b == 0xAA || b == 0xBA {
+                            self.ordinal_state = OrdinalState::OrdinalExpectingSpace;
+                        } else if b == b'M' || b == b'D' || b == b'S' {
+                            self.ordinal_state = OrdinalState::FeminineAbbreviationStartLetter;
+                        } else if b == b'N' {
+                            // numero or Nuestra
+                            self.ordinal_state = OrdinalState::UpperN;
+                        } else if b == b'n' {
+                            // numero
+                            self.ordinal_state = OrdinalState::LowerN;
+                        } else if caseless_class == (ASCII_DIGIT as u8) {
+                            self.ordinal_state = OrdinalState::Digit;
+                        } else if caseless_class == 9 /* I */ || caseless_class == 22 /* V */ || caseless_class == 24
+                        /* X */
+                        {
+                            self.ordinal_state = OrdinalState::Roman;
+                        } else {
+                            self.ordinal_state = OrdinalState::Other;
+                        }
+                    }
+                    OrdinalState::OrdinalExpectingSpace => {
+                        if caseless_class == 0 {
+                            score += ORDINAL_BONUS;
+                            self.ordinal_state = OrdinalState::Space;
+                        } else {
+                            self.ordinal_state = OrdinalState::Other;
+                        }
+                    }
+                    OrdinalState::OrdinalExpectingSpaceUndoImplausibility => {
+                        if caseless_class == 0 {
+                            score += ORDINAL_BONUS - IMPLAUSIBILITY_PENALTY;
+                            self.ordinal_state = OrdinalState::Space;
+                        } else {
+                            self.ordinal_state = OrdinalState::Other;
+                        }
+                    }
+                    OrdinalState::OrdinalExpectingSpaceOrDigit => {
+                        if caseless_class == 0 {
+                            score += ORDINAL_BONUS;
+                            self.ordinal_state = OrdinalState::Space;
+                        } else if caseless_class == (ASCII_DIGIT as u8) {
+                            score += ORDINAL_BONUS;
+                            // Deliberately set to `Other`
+                            self.ordinal_state = OrdinalState::Other;
+                        } else {
+                            self.ordinal_state = OrdinalState::Other;
+                        }
+                    }
+                    OrdinalState::OrdinalExpectingSpaceOrDigitUndoImplausibily => {
+                        if caseless_class == 0 {
+                            score += ORDINAL_BONUS - IMPLAUSIBILITY_PENALTY;
+                            self.ordinal_state = OrdinalState::Space;
+                        } else if caseless_class == (ASCII_DIGIT as u8) {
+                            score += ORDINAL_BONUS - IMPLAUSIBILITY_PENALTY;
+                            // Deliberately set to `Other`
+                            self.ordinal_state = OrdinalState::Other;
+                        } else {
+                            self.ordinal_state = OrdinalState::Other;
+                        }
+                    }
+                    OrdinalState::UpperN => {
+                        if b == 0xAA {
+                            self.ordinal_state =
+                                OrdinalState::OrdinalExpectingSpaceUndoImplausibility;
+                        } else if b == 0xBA {
+                            self.ordinal_state =
+                                OrdinalState::OrdinalExpectingSpaceOrDigitUndoImplausibily;
+                        } else if b == b'.' {
+                            self.ordinal_state = OrdinalState::PeriodAfterN;
+                        } else if caseless_class == 0 {
+                            self.ordinal_state = OrdinalState::Space;
+                        } else {
+                            self.ordinal_state = OrdinalState::Other;
+                        }
+                    }
+                    OrdinalState::LowerN => {
+                        if b == 0xBA {
+                            self.ordinal_state =
+                                OrdinalState::OrdinalExpectingSpaceOrDigitUndoImplausibily;
+                        } else if b == b'.' {
+                            self.ordinal_state = OrdinalState::PeriodAfterN;
+                        } else if caseless_class == 0 {
+                            self.ordinal_state = OrdinalState::Space;
+                        } else {
+                            self.ordinal_state = OrdinalState::Other;
+                        }
+                    }
+                    OrdinalState::FeminineAbbreviationStartLetter => {
+                        if b == 0xAA {
+                            self.ordinal_state =
+                                OrdinalState::OrdinalExpectingSpaceUndoImplausibility;
+                        } else if caseless_class == 0 {
+                            self.ordinal_state = OrdinalState::Space;
+                        } else {
+                            self.ordinal_state = OrdinalState::Other;
+                        }
+                    }
+                    OrdinalState::Digit => {
+                        if b == 0xAA || b == 0xBA {
+                            self.ordinal_state = OrdinalState::OrdinalExpectingSpace;
+                        } else if caseless_class == 0 {
+                            self.ordinal_state = OrdinalState::Space;
+                        } else if caseless_class == (ASCII_DIGIT as u8) {
+                            // pass
+                        } else {
+                            self.ordinal_state = OrdinalState::Other;
+                        }
+                    }
+                    OrdinalState::Roman => {
+                        if b == 0xAA || b == 0xBA {
+                            self.ordinal_state =
+                                OrdinalState::OrdinalExpectingSpaceUndoImplausibility;
+                        } else if caseless_class == 0 {
+                            self.ordinal_state = OrdinalState::Space;
+                        } else if caseless_class == 9 /* I */ || caseless_class == 22 /* V */ || caseless_class == 24
+                        /* X */
+                        {
+                            // pass
+                        } else {
+                            self.ordinal_state = OrdinalState::Other;
+                        }
+                    }
+                    OrdinalState::PeriodAfterN => {
+                        if b == 0xBA {
+                            self.ordinal_state = OrdinalState::OrdinalExpectingSpaceOrDigit;
+                        } else if caseless_class == 0 {
+                            self.ordinal_state = OrdinalState::Space;
+                        } else {
+                            self.ordinal_state = OrdinalState::Other;
+                        }
+                    }
+                }
             }
 
             if ascii {
@@ -2239,6 +2423,45 @@ fn count_non_ascii(buffer: &[u8]) -> u64 {
     count
 }
 
+#[derive(Clone, Copy)]
+enum BeforeNonAscii {
+    None,
+    One([u8; 1]),
+    Two([u8; 2]),
+}
+
+impl BeforeNonAscii {
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            BeforeNonAscii::None => b"",
+            BeforeNonAscii::One(arr) => &arr[..],
+            BeforeNonAscii::Two(arr) => &arr[..],
+        }
+    }
+
+    fn push(&mut self, buffer: &[u8]) {
+        if buffer.len() >= 2 {
+            let arr = [buffer[0], buffer[1]];
+            *self = BeforeNonAscii::Two(arr);
+        } else if buffer.len() == 1 {
+            match self {
+                BeforeNonAscii::None => {
+                    let arr = [buffer[0]];
+                    *self = BeforeNonAscii::One(arr);
+                }
+                BeforeNonAscii::One(first) => {
+                    let arr = [first[0], buffer[0]];
+                    *self = BeforeNonAscii::Two(arr);
+                }
+                BeforeNonAscii::Two(first) => {
+                    let arr = [first[1], buffer[0]];
+                    *self = BeforeNonAscii::Two(arr);
+                }
+            }
+        }
+    }
+}
+
 /// A Web browser-oriented detector for guessing what character
 /// encoding a stream of bytes is encoded in.
 ///
@@ -2253,7 +2476,9 @@ fn count_non_ascii(buffer: &[u8]) -> u64 {
 pub struct EncodingDetector {
     candidates: [Candidate; 27],
     non_ascii_seen: u64,
-    last_before_non_ascii: Option<u8>,
+    // We need to feed up to two bytes of context before non-ASCII
+    // thanks to Spanish n.º.
+    last_before_non_ascii: BeforeNonAscii,
     esc_seen: bool,
     closed: bool,
 }
@@ -2308,18 +2533,17 @@ impl EncodingDetector {
             } else {
                 up_to
             };
-            if start == buffer.len() && !buffer.is_empty() {
-                self.last_before_non_ascii = Some(buffer[buffer.len() - 1]);
+            if start == buffer.len() {
+                self.last_before_non_ascii.push(buffer);
                 return self.non_ascii_seen != 0;
             }
-            if start == 0 {
-                if let Some(ascii) = self.last_before_non_ascii {
-                    let src = [ascii];
-                    self.feed_impl(&src, false);
-                }
-                start
+            if start == 0 || start == 1 {
+                let last_before = self.last_before_non_ascii;
+                self.last_before_non_ascii = BeforeNonAscii::None;
+                self.feed_impl(last_before.as_slice(), false);
+                0
             } else {
-                start - 1
+                start - 2
             }
         } else {
             0
@@ -2584,7 +2808,7 @@ impl EncodingDetector {
                 Candidate::new_non_latin_cased(&SINGLE_BYTE_DATA[ISO_8859_5_INDEX]),   // 26
             ],
             non_ascii_seen: 0,
-            last_before_non_ascii: None,
+            last_before_non_ascii: BeforeNonAscii::None,
             esc_seen: false,
             closed: false,
         }
@@ -2635,6 +2859,48 @@ mod tests {
     fn test_i_apostrophe() {
         let mut det = EncodingDetector::new();
         det.feed(b"I\x92", true);
+        let enc = det.guess(None, false);
+        assert_eq!(enc, WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_streaming_numero_one_by_one() {
+        let mut det = EncodingDetector::new();
+        det.feed(b"n", false);
+        det.feed(b".", false);
+        det.feed(b"\xBA", false);
+        det.feed(b"1", true);
+        let enc = det.guess(None, false);
+        assert_eq!(enc, WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_streaming_numero_two_together() {
+        let mut det = EncodingDetector::new();
+        det.feed(b"n.", false);
+        det.feed(b"\xBA", false);
+        det.feed(b"1", true);
+        let enc = det.guess(None, false);
+        assert_eq!(enc, WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_streaming_numero_one_by_one_extra_before() {
+        let mut det = EncodingDetector::new();
+        det.feed(b" n", false);
+        det.feed(b".", false);
+        det.feed(b"\xBA", false);
+        det.feed(b"1", true);
+        let enc = det.guess(None, false);
+        assert_eq!(enc, WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_streaming_numero_one_before() {
+        let mut det = EncodingDetector::new();
+        det.feed(b"n", false);
+        det.feed(b".\xBA", false);
+        det.feed(b"1", true);
         let enc = det.guess(None, false);
         assert_eq!(enc, WINDOWS_1252);
     }
@@ -2867,5 +3133,75 @@ mod tests {
     fn test_a0() {
         // Test that this isn't IBM866. TODO: What about GBK with fully paired 0xA0?
         check("\u{A0}\u{A0} \u{A0}", WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_space_masculine_space() {
+        check(" º ", WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_space_feminine_space() {
+        check(" ª ", WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_period_masculine_space() {
+        check(".º ", WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_period_feminine_space() {
+        check(".ª ", WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_maria() {
+        check(" Mª ", WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_dona() {
+        check(" Dª ", WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_nuestra() {
+        check(" Nª ", WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_senora() {
+        check(" Sª ", WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_digit_feminine() {
+        check(" 42ª ", WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_digit_masculine() {
+        check(" 42º ", WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_roman_feminine() {
+        check(" XIVª ", WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_roman_masculine() {
+        check(" XIVº ", WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_numero_uno() {
+        check("Nº1", WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_numero() {
+        check("Nº", WINDOWS_1252);
     }
 }
