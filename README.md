@@ -124,6 +124,10 @@ In general `chardetng` prefers to do negative matching (rule out possibilities f
 
 ## Release Notes
 
+### 0.1.8
+
+* Avoid detecting English with no-break spaces as GBK or EUC-KR.
+
 ### 0.1.7
 
 * Avoid misdetecting windows-1252 English as windows-1254.

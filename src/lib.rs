@@ -1139,7 +1139,7 @@ fn problematic_lead(b: u8) -> bool {
 
 // GBK and EUC-KR
 fn more_problematic_lead(b: u8) -> bool {
-    problematic_lead(b) || b == 0x82 || b == 0x84 || b == 0x85
+    problematic_lead(b) || b == 0x82 || b == 0x84 || b == 0x85 || b == 0xA0
 }
 
 struct ShiftJisCandidate {
@@ -3133,6 +3133,12 @@ mod tests {
     fn test_a0() {
         // Test that this isn't IBM866. TODO: What about GBK with fully paired 0xA0?
         check("\u{A0}\u{A0} \u{A0}", WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_a0a0() {
+        // Test that this isn't GBK or EUC-KR.
+        check("\u{A0}\u{A0}", WINDOWS_1252);
     }
 
     #[test]
