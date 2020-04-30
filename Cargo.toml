@@ -1,7 +1,7 @@
 [package]
 name = "chardetng"
 description = "A character encoding detector for legacy Web content"
-version = "0.1.8"
+version = "0.1.9"
 authors = ["Henri Sivonen <hsivonen@hsivonen.fi>"]
 edition = "2018"
 license = "Apache-2.0 OR MIT"
