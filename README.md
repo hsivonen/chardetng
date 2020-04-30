@@ -124,6 +124,10 @@ In general `chardetng` prefers to do negative matching (rule out possibilities f
 
 ## Release Notes
 
+### 0.1.9
+
+* Fix a bug in ASCII prefix skipping. (Was introduced in 0.1.7.)
+
 ### 0.1.8
 
 * Avoid detecting English with no-break spaces as GBK or EUC-KR.

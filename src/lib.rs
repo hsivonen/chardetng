@@ -2440,10 +2440,11 @@ impl BeforeNonAscii {
     }
 
     fn push(&mut self, buffer: &[u8]) {
-        if buffer.len() >= 2 {
-            let arr = [buffer[0], buffer[1]];
+        let len = buffer.len();
+        if len >= 2 {
+            let arr = [buffer[len - 2], buffer[len - 1]];
             *self = BeforeNonAscii::Two(arr);
-        } else if buffer.len() == 1 {
+        } else if len == 1 {
             match self {
                 BeforeNonAscii::None => {
                     let arr = [buffer[0]];
@@ -2900,6 +2901,16 @@ mod tests {
         let mut det = EncodingDetector::new();
         det.feed(b"n", false);
         det.feed(b".\xBA", false);
+        det.feed(b"1", true);
+        let enc = det.guess(None, false);
+        assert_eq!(enc, WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_streaming_numero_longer_first_buffer() {
+        let mut det = EncodingDetector::new();
+        det.feed(b"rrn.", false);
+        det.feed(b"\xBA", false);
         det.feed(b"1", true);
         let enc = det.guess(None, false);
         assert_eq!(enc, WINDOWS_1252);
