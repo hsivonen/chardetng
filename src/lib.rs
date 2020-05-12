@@ -12,6 +12,9 @@
 //! It is optimized for binary size in applications that already depend
 //! on `encoding_rs` for other reasons.
 
+#[cfg(feature = "rayon")]
+use rayon::prelude::*;
+
 use encoding_rs::Decoder;
 use encoding_rs::DecoderResult;
 use encoding_rs::Encoding;
@@ -2485,12 +2488,24 @@ pub struct EncodingDetector {
 }
 
 impl EncodingDetector {
-    fn feed_impl(&mut self, buffer: &[u8], last: bool) {
-        for candidate in self.candidates.iter_mut() {
-            candidate.feed(buffer, last);
+
+cfg_if::cfg_if! {
+    if #[cfg(feature = "rayon")] {
+        fn feed_impl(&mut self, buffer: &[u8], last: bool) {
+            self.candidates.par_iter_mut().for_each(|candidate| candidate.feed(buffer, last));
+            self.non_ascii_seen += count_non_ascii(buffer);
         }
-        self.non_ascii_seen += count_non_ascii(buffer);
+    } else {
+        fn feed_impl(&mut self, buffer: &[u8], last: bool) {
+            for candidate in self.candidates.iter_mut() {
+                candidate.feed(buffer, last);
+            }
+            self.non_ascii_seen += count_non_ascii(buffer);
+        }
     }
+}
+
+
 
     /// Inform the detector of a chunk of input.
     ///
