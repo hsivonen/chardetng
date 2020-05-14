@@ -2191,9 +2191,19 @@ fn score_adjustment(score: i64, encoding: usize, tld: Tld) -> i64 {
     (score / divisor) + constant
 }
 
-struct Candidate {
-    inner: InnerCandidate,
-    score: Option<i64>,
+cfg_if::cfg_if! {
+    if #[cfg(feature = "rayon")] {
+        #[repr(align(64))] // Align to cache lines to avoid false sharing in the Rayon case
+        struct Candidate {
+            inner: InnerCandidate,
+            score: Option<i64>,
+        }
+    } else {
+        struct Candidate {
+            inner: InnerCandidate,
+            score: Option<i64>,
+        }
+    }
 }
 
 impl Candidate {
