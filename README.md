@@ -30,7 +30,7 @@ This crate aims to be more accurate than ICU, more complete than `chardet`, more
 
 ## Rayon support
 
-Enabling the optional feature `rayon` makes `chardetng` run the detection in multithreaded way. Unfortunately, the performance doesn't scale linearly with CPU cores, but it's still better than single-threaded performance. However, if you can find a parallelization point at some higher-level task, you are probably better off using Rayon there.
+Enabling the optional feature `rayon` makes `chardetng` run the detectors for individual encodings in parallel. Unfortunately, the performance doesn't scale linearly with CPU cores, but it's still better than single-threaded performance. However, if you can find a parallelization point at some higher-level task, you are probably better off using Rayon there.
 
 ## Principle of Operation
 
