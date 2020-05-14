@@ -28,6 +28,10 @@ The purpose of this detector is user retention for Firefox by ensuring that the 
 
 This crate aims to be more accurate than ICU, more complete than `chardet`, more explainable and modifiable than `compact_enc_det` (aka. ced), and, in an application that already depends on `encoding_rs` for other reasons, smaller in added binary footprint than `compact_enc_det`.
 
+## Rayon support
+
+Enabling the optional feature `rayon` makes `chardetng` run the detection in multithreaded way. Unfortunately, the performance doesn't scale linearly with CPU cores, but it's still better than single-threaded performance. However, if you can find a parallelization point at some higher-level task, you are probably better off using Rayon there.
+
 ## Principle of Operation
 
 In general `chardetng` prefers to do negative matching (rule out possibilities from the set of plausible encodings) than to do positive matching. Since negative matching is insufficient, there is positive matching, too.
@@ -42,6 +46,9 @@ In general `chardetng` prefers to do negative matching (rule out possibilities f
    - For Latin encodings, having three non-ASCII letters in a row is penalized a little and having four or more is penalized a lot.
    - For non-Latin encodings, having a non-Latin letter right next to a Latin letter is penalized.
    - For single-byte encodings, having a character pair (excluding pairs where both characters are ASCII) that never occurs in the Wikipedias for the applicable languages is heavily penalized.
+   - Turkish I paired with a space-like character does not get a score to avoid detecting English as Turkish.
+   - There's a dedicated state machine for giving score to windows-1252 ordinal indicators, which would otherwise be hard to give score to without breaking windows-1250 Romanian detection.
+   - 0xA0, which is no-break space in most single-byte encodings, is special-cased in IBM866 and CJK encodings to avoid misdetection.
 
 ## Notes About Encodings
 
@@ -111,7 +118,7 @@ In general `chardetng` prefers to do negative matching (rule out possibilities f
 
 ## Roadmap
 
-- [ ] Investigate parallelizing the `feed` method using Rayon.
+- [x] Investigate parallelizing the `feed` method using Rayon.
 - [x] Improve windows-874 detection for short inputs.
 - [ ] Improve GBK detection for short inputs.
 - [ ] Reorganize the frequency data for telling short GBK, EUC-JP, and EUC-KR inputs apart.
@@ -123,6 +130,11 @@ In general `chardetng` prefers to do negative matching (rule out possibilities f
 - [ ] Reduce the binary size by not storing the scores for C1 controls.
 
 ## Release Notes
+
+### 0.1.10
+
+* Stop computing extra scores for common CJK characters after enough extra-score-eligible characters have been seen. (Improves performance with long CJK inputs.)
+* Add Rayon support.
 
 ### 0.1.9
 
