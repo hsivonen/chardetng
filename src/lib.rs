@@ -34,6 +34,10 @@ use data::*;
 use tld::classify_tld;
 use tld::Tld;
 
+// The number of potentially-extra-scoring characters to actually
+// get the extra score computed.
+const CJK_EXTRA_SCORE_MAX_CHARACTERS: u16 = 500;
+
 const LATIN_ADJACENCY_PENALTY: i64 = -50;
 
 const IMPLAUSIBILITY_PENALTY: i64 = -220;
@@ -953,6 +957,7 @@ struct GbkCandidate {
     prev_byte: u8,
     prev: LatinCj,
     pending_score: Option<i64>,
+    extra_score_seen: u16,
 }
 
 impl GbkCandidate {
@@ -994,8 +999,13 @@ impl GbkCandidate {
                         match self.prev_byte {
                             0xA1..=0xD7 => {
                                 score += GBK_SCORE_PER_LEVEL_1;
-                                score +=
-                                    cjk_extra_score(u, &data::DETECTOR_DATA.frequent_simplified);
+                                if self.extra_score_seen < CJK_EXTRA_SCORE_MAX_CHARACTERS {
+                                    score += cjk_extra_score(
+                                        u,
+                                        &data::DETECTOR_DATA.frequent_simplified,
+                                    );
+                                    self.extra_score_seen += 1;
+                                }
                             }
                             0xD8..=0xFE => score += GBK_SCORE_PER_LEVEL_2,
                             _ => {
@@ -1151,6 +1161,7 @@ struct ShiftJisCandidate {
     prev: LatinCj,
     prev_byte: u8,
     pending_score: Option<i64>,
+    extra_score_seen: u16,
 }
 
 impl ShiftJisCandidate {
@@ -1209,10 +1220,15 @@ impl ShiftJisCandidate {
                         self.pending_score = None;
                     }
                     if self.prev_byte < 0x98 || (self.prev_byte == 0x98 && b < 0x73) {
-                        score += self.maybe_set_as_pending(
-                            SHIFT_JIS_SCORE_PER_LEVEL_1_KANJI
-                                + cjk_extra_score(u, &data::DETECTOR_DATA.frequent_kanji),
-                        );
+                        if self.extra_score_seen < CJK_EXTRA_SCORE_MAX_CHARACTERS {
+                            score += self.maybe_set_as_pending(
+                                SHIFT_JIS_SCORE_PER_LEVEL_1_KANJI
+                                    + cjk_extra_score(u, &data::DETECTOR_DATA.frequent_kanji),
+                            );
+                            self.extra_score_seen += 1;
+                        } else {
+                            score += self.maybe_set_as_pending(SHIFT_JIS_SCORE_PER_LEVEL_1_KANJI);
+                        }
                     } else {
                         score += self.maybe_set_as_pending(SHIFT_JIS_SCORE_PER_LEVEL_2_KANJI);
                     }
@@ -1295,6 +1311,7 @@ struct EucJpCandidate {
     prev: LatinCj,
     prev_byte: u8,
     prev_prev_byte: u8,
+    extra_score_seen: u16,
 }
 
 impl EucJpCandidate {
@@ -1353,7 +1370,10 @@ impl EucJpCandidate {
                         score += EUC_JP_SCORE_PER_OTHER_KANJI;
                     } else if self.prev_byte < 0xD0 {
                         score += EUC_JP_SCORE_PER_LEVEL_1_KANJI;
-                        score += cjk_extra_score(u, &data::DETECTOR_DATA.frequent_kanji);
+                        if self.extra_score_seen < CJK_EXTRA_SCORE_MAX_CHARACTERS {
+                            score += cjk_extra_score(u, &data::DETECTOR_DATA.frequent_kanji);
+                            self.extra_score_seen += 1;
+                        }
                     } else {
                         score += EUC_JP_SCORE_PER_LEVEL_2_KANJI;
                     }
@@ -1555,6 +1575,7 @@ struct EucKrCandidate {
     prev: LatinKorean,
     current_word_len: u64,
     pending_score: Option<i64>,
+    extra_score_seen: u16,
 }
 
 impl EucKrCandidate {
@@ -1599,7 +1620,10 @@ impl EucKrCandidate {
                     }
                     if self.prev_was_euc_range && in_euc_range {
                         score += EUC_KR_SCORE_PER_EUC_HANGUL;
-                        score += cjk_extra_score(u, &data::DETECTOR_DATA.frequent_hangul);
+                        if self.extra_score_seen < CJK_EXTRA_SCORE_MAX_CHARACTERS {
+                            score += cjk_extra_score(u, &data::DETECTOR_DATA.frequent_hangul);
+                            self.extra_score_seen += 1;
+                        }
                     } else {
                         score += self.maybe_set_as_pending(EUC_KR_SCORE_PER_NON_EUC_HANGUL);
                     }
@@ -2251,6 +2275,7 @@ impl Candidate {
                 prev: LatinCj::Other,
                 prev_byte: 0,
                 pending_score: None,
+                extra_score_seen: 0,
             }),
             score: Some(0),
         }
@@ -2264,6 +2289,7 @@ impl Candidate {
                 prev: LatinCj::Other,
                 prev_byte: 0,
                 prev_prev_byte: 0,
+                extra_score_seen: 0,
             }),
             score: Some(0),
         }
@@ -2278,6 +2304,7 @@ impl Candidate {
                 prev: LatinKorean::Other,
                 current_word_len: 0,
                 pending_score: None,
+                extra_score_seen: 0,
             }),
             score: Some(0),
         }
@@ -2302,6 +2329,7 @@ impl Candidate {
                 prev: LatinCj::Other,
                 prev_byte: 0,
                 pending_score: None,
+                extra_score_seen: 0,
             }),
             score: Some(0),
         }
@@ -2488,24 +2516,21 @@ pub struct EncodingDetector {
 }
 
 impl EncodingDetector {
-
-cfg_if::cfg_if! {
-    if #[cfg(feature = "rayon")] {
-        fn feed_impl(&mut self, buffer: &[u8], last: bool) {
-            self.candidates.par_iter_mut().for_each(|candidate| candidate.feed(buffer, last));
-            self.non_ascii_seen += count_non_ascii(buffer);
-        }
-    } else {
-        fn feed_impl(&mut self, buffer: &[u8], last: bool) {
-            for candidate in self.candidates.iter_mut() {
-                candidate.feed(buffer, last);
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "rayon")] {
+            fn feed_impl(&mut self, buffer: &[u8], last: bool) {
+                self.candidates.par_iter_mut().for_each(|candidate| candidate.feed(buffer, last));
+                self.non_ascii_seen += count_non_ascii(buffer);
             }
-            self.non_ascii_seen += count_non_ascii(buffer);
+        } else {
+            fn feed_impl(&mut self, buffer: &[u8], last: bool) {
+                for candidate in self.candidates.iter_mut() {
+                    candidate.feed(buffer, last);
+                }
+                self.non_ascii_seen += count_non_ascii(buffer);
+            }
         }
     }
-}
-
-
 
     /// Inform the detector of a chunk of input.
     ///
