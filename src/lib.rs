@@ -15,6 +15,9 @@
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
+#[cfg(feature = "rayon")]
+use arrayvec::ArrayVec;
+
 use encoding_rs::Decoder;
 use encoding_rs::DecoderResult;
 use encoding_rs::Encoding;
@@ -2217,8 +2220,9 @@ impl Candidate {
         }
     }
 
-    fn disqualified(&self) -> bool {
-        self.score.is_none()
+    #[cfg(feature = "rayon")]
+    fn qualified(&self) -> bool {
+        !self.score.is_none()
     }
 
     fn new_latin(data: &'static SingleByteData) -> Self {
@@ -2527,41 +2531,34 @@ pub struct EncodingDetector {
     last_before_non_ascii: BeforeNonAscii,
     esc_seen: bool,
     closed: bool,
-    first_qualified: u8,
-    last_qualified: u8,
 }
 
 impl EncodingDetector {
-    /// Updates `self.first_qualified` to be the index of the first
-    /// candidate that isn't disqualified and `self.last_qualified`
-    /// to be one past the last candidate that isn't disqualified.
-    /// This is an optimization for Rayon in order to avoid
-    /// uselessly dispatching a task to another thread only to
-    /// bail out immediately.
-    fn update_qualified(&mut self) {
-        // Note that multiple Cyrillic encodings never become
-        // disqualified, so the iteration is guaranteed to terminate
-        // within the candidate array.
-        while self.candidates[usize::from(self.first_qualified)].disqualified() {
-            self.first_qualified += 1;
-        }
-        while self.candidates[usize::from(self.last_qualified) - 1].disqualified() {
-            self.last_qualified -= 1;
-        }
-    }
-
     cfg_if::cfg_if! {
         if #[cfg(feature = "rayon")] {
             fn feed_impl(&mut self, buffer: &[u8], last: bool) {
-                self.update_qualified();
-                let (_, non_ascii) = rayon::join(|| (&mut self.candidates[usize::from(self.first_qualified)..usize::from(self.last_qualified)]).par_iter_mut().for_each(|candidate| candidate.feed(buffer, last)),
+                if buffer.len() < 10 {
+                    self.candidates.iter_mut().for_each(|candidate| candidate.feed(buffer, last));
+                    self.non_ascii_seen += count_non_ascii(buffer);
+                    return;
+                }
+                // Collect only qualified candidates to avoid Rayon
+                // performing thread synchronization only to bail
+                // out immediately when trying a disqualified
+                // candidate.
+                let mut qualified = ArrayVec::<[_; 27]>::new();
+                for candidate in self.candidates.iter_mut() {
+                    if candidate.qualified() {
+                        qualified.push(candidate);
+                    }
+                }
+                let (_, non_ascii) = rayon::join(|| qualified.par_iter_mut().for_each(|candidate| candidate.feed(buffer, last)),
                                                  || count_non_ascii(buffer));
                 self.non_ascii_seen += non_ascii;
             }
         } else {
             fn feed_impl(&mut self, buffer: &[u8], last: bool) {
-                self.update_qualified(); // For consistency with the Rayon case
-                (&mut self.candidates[usize::from(self.first_qualified)..usize::from(self.last_qualified)]).iter_mut().for_each(|candidate| candidate.feed(buffer, last));
+                self.candidates.iter_mut().for_each(|candidate| candidate.feed(buffer, last));
                 self.non_ascii_seen += count_non_ascii(buffer);
             }
         }
@@ -2887,8 +2884,6 @@ impl EncodingDetector {
             last_before_non_ascii: BeforeNonAscii::None,
             esc_seen: false,
             closed: false,
-            first_qualified: 0,
-            last_qualified: 27,
         }
     }
 }
