@@ -18,6 +18,16 @@ use rayon::prelude::*;
 #[cfg(feature = "rayon")]
 use arrayvec::ArrayVec;
 
+#[cfg(all(target_arch = "x86", target_feature = "sse2"))]
+use core::arch::x86::__m128i;
+#[cfg(all(target_arch = "x86", target_feature = "sse2"))]
+use core::arch::x86::_mm_movemask_epi8;
+
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+use core::arch::x86_64::__m128i;
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+use core::arch::x86_64::_mm_movemask_epi8;
+
 use encoding_rs::Decoder;
 use encoding_rs::DecoderResult;
 use encoding_rs::Encoding;
@@ -2462,14 +2472,38 @@ impl Candidate {
     }
 }
 
-fn count_non_ascii(buffer: &[u8]) -> u64 {
-    let mut count = 0;
-    for &b in buffer {
-        if b >= 0x80 {
-            count += 1;
+// LLVM doesn't autovectorize this properly for SSE2, so let's help manually.
+cfg_if::cfg_if! {
+    if #[cfg(target_feature = "sse2")] {
+        fn count_non_ascii(buffer: &[u8]) -> u64 {
+            let mut count = 0;
+            let (prefix, simd, suffix) = unsafe { buffer.align_to::<__m128i>() };
+            for &b in prefix {
+                if b >= 0x80 {
+                    count += 1;
+                }
+            }
+            for &s in simd {
+                count += unsafe {_mm_movemask_epi8(s)}.count_ones() as u64;
+            }
+            for &b in suffix {
+                if b >= 0x80 {
+                    count += 1;
+                }
+            }
+            count
+        }
+    } else {
+        fn count_non_ascii(buffer: &[u8]) -> u64 {
+            let mut count = 0;
+            for &b in buffer {
+                if b >= 0x80 {
+                    count += 1;
+                }
+            }
+            count
         }
     }
-    count
 }
 
 #[derive(Clone, Copy)]
