@@ -12,10 +12,10 @@
 //! It is optimized for binary size in applications that already depend
 //! on `encoding_rs` for other reasons.
 
-#[cfg(feature = "rayon")]
+#[cfg(feature = "multithreading")]
 use rayon::prelude::*;
 
-#[cfg(feature = "rayon")]
+#[cfg(feature = "multithreading")]
 use arrayvec::ArrayVec;
 
 #[cfg(all(target_arch = "x86", target_feature = "sse2"))]
@@ -2205,7 +2205,7 @@ fn score_adjustment(score: i64, encoding: usize, tld: Tld) -> i64 {
 }
 
 cfg_if::cfg_if! {
-    if #[cfg(feature = "rayon")] {
+    if #[cfg(feature = "multithreading")] {
         #[repr(align(64))] // Align to cache lines to avoid false sharing in the Rayon case
         struct Candidate {
             inner: InnerCandidate,
@@ -2230,7 +2230,7 @@ impl Candidate {
         }
     }
 
-    #[cfg(feature = "rayon")]
+    #[cfg(feature = "multithreading")]
     fn qualified(&self) -> bool {
         !self.score.is_none()
     }
@@ -2569,7 +2569,7 @@ pub struct EncodingDetector {
 
 impl EncodingDetector {
     cfg_if::cfg_if! {
-        if #[cfg(feature = "rayon")] {
+        if #[cfg(feature = "multithreading")] {
             fn feed_impl(&mut self, buffer: &[u8], last: bool) {
                 if buffer.len() < 10 {
                     self.candidates.iter_mut().for_each(|candidate| candidate.feed(buffer, last));
