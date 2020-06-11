@@ -119,6 +119,13 @@ In general `chardetng` prefers to do negative matching (rule out possibilities f
 * windows-1257 detection is very inaccurate. (This detector currently doesn't use trigrams. ced uses 8 KB of trigram data to solve this.)
 * On non-generic domains, some encodings that are confusable with the legacy encodings native to the TLD are excluded from guesses outright unless the input is invalid according to all the TLD-native encodings.
 
+## Associated tools
+
+* [traindet](https://github.com/hsivonen/traindet) tool for computing the statistics for the generated code
+* [detector_char_classes](https://github.com/hsivonen/detector_char_classes/) classification of characters in the single-byte encodings
+* [charcounts](https://github.com/hsivonen/charcounts) intermediate files for traindet that make it possible to rerun the code generation without rerunning the statistic gathering
+* [testdet](https://github.com/hsivonen/testdet) testing tool
+
 ## Roadmap
 
 - [x] Investigate parallelizing the `feed` method using Rayon.
