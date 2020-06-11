@@ -16,6 +16,9 @@ Please see the file named
 Generated [API documentation](https://docs.rs/chardetng/) is available
 online.
 
+There is a [long-form write-up](https://hsivonen.fi/chardetng/) about the
+design and motivation of the crate.
+
 ## Purpose
 
 The purpose of this detector is user retention for Firefox by ensuring that the long tail of the legacy Web is not more convenient to use in Chrome than in Firefox. (Chrome deployed [ced](https://github.com/google/compact_enc_det/), which left Firefox less convenient to use until the deployment of this detector.)
