@@ -145,6 +145,7 @@ In general `chardetng` prefers to do negative matching (rule out possibilities f
 
 * Stop computing extra scores for common CJK characters after enough extra-score-eligible characters have been seen. (Improves performance with long CJK inputs.)
 * Add Rayon support.
+* Avoid detecting windows-1252 euro sign as GBK.
 
 ### 0.1.9
 
