@@ -96,6 +96,8 @@ const BIG5_SCORE_PER_LEVEL_1_HANZI: i64 = CJK_BASE_SCORE;
 
 const BIG5_SCORE_PER_OTHER_HANZI: i64 = CJK_SECONDARY_BASE_SCORE;
 
+const BIG5_PUA_PENALTY: i64 = -(CJK_BASE_SCORE * 10); // Should this be larger?
+
 const EUC_KR_SCORE_PER_EUC_HANGUL: i64 = CJK_BASE_SCORE + 1;
 
 const EUC_KR_SCORE_PER_NON_EUC_HANGUL: i64 = CJK_SECONDARY_BASE_SCORE / 5;
@@ -1006,7 +1008,7 @@ impl GbkCandidate {
                 } else if u == 0x20AC {
                     // euro sign
                     self.pending_score = None; // Discard pending score
-                    // Should there even be a penalty?
+                                               // Should there even be a penalty?
                     self.prev = LatinCj::Other;
                 } else if u >= 0x4E00 && u <= 0x9FA5 {
                     if let Some(pending) = self.pending_score {
@@ -1567,7 +1569,19 @@ impl Big5Candidate {
                     assert_eq!(read, 1);
                 }
                 DecoderResult::Malformed(_, _) => {
-                    return None;
+                    if self.prev_byte >= 0x81
+                        && self.prev_byte <= 0xFE
+                        && ((b >= 0x40 && b <= 0x7E) || (b >= 0xA1 && b <= 0xFE))
+                    {
+                        // The byte pair is in the Big5 range but unmapped.
+                        // Treat as PUA to avoid rejecting Big5-UAO, etc.
+                        // We don't reprocess `b` even if ASCII, since it's
+                        // logically part of the pair.
+                        score += BIG5_PUA_PENALTY;
+                        self.prev = LatinCj::Cj;
+                    } else {
+                        return None;
+                    }
                 }
                 DecoderResult::OutputFull => {
                     unreachable!();
@@ -2955,6 +2969,15 @@ mod tests {
     use encoding_rs::WINDOWS_1258;
     use encoding_rs::WINDOWS_874;
 
+    fn check_bytes(bytes: &[u8], encoding: &'static Encoding) {
+        let mut det = EncodingDetector::new();
+        det.feed(bytes, true);
+        let enc = det.guess(None, false);
+        let (decoded, _) = enc.decode_without_bom_handling(bytes);
+        println!("{:?}", decoded);
+        assert_eq!(enc, encoding);
+    }
+
     fn check(input: &str, encoding: &'static Encoding) {
         let orthographic;
         let (bytes, _, _) = if encoding == WINDOWS_1258 {
@@ -2966,12 +2989,7 @@ mod tests {
         } else {
             encoding.encode(input)
         };
-        let mut det = EncodingDetector::new();
-        det.feed(&bytes, true);
-        let enc = det.guess(None, false);
-        let (decoded, _) = enc.decode_without_bom_handling(&bytes);
-        println!("{:?}", decoded);
-        assert_eq!(enc, encoding);
+        check_bytes(&bytes, encoding);
     }
 
     #[test]
@@ -3345,4 +3363,13 @@ mod tests {
         check(" €9", WINDOWS_1252);
     }
 
+    #[test]
+    fn test_big5_pua() {
+        check_bytes(b"\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\x81\x40\xA4\x40", BIG5);
+    }
+
+    #[test]
+    fn test_not_big5() {
+        check_bytes(b"\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\xA4\x40\x81\xA0\xA4\x40", IBM866);
+    }
 }
