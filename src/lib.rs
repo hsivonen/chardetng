@@ -1580,6 +1580,10 @@ impl Big5Candidate {
                         // We don't reprocess `b` even if ASCII, since it's
                         // logically part of the pair.
                         score += BIG5_PUA_PENALTY;
+                        // Assume Hanzi semantics
+                        if self.prev == LatinCj::AsciiLetter {
+                            score += CJK_LATIN_ADJACENCY_PENALTY;
+                        }
                         self.prev = LatinCj::Cj;
                     } else {
                         return None;
@@ -1719,7 +1723,21 @@ impl EucKrCandidate {
                     {
                         // The byte pair is in code page 949 EUDC range
                         score += EUC_KR_PUA_PENALTY;
+                        // Assume Hanja semantics
+                        match self.prev {
+                            LatinKorean::AsciiLetter => {
+                                score += CJK_LATIN_ADJACENCY_PENALTY;
+                            }
+                            LatinKorean::Hangul => {
+                                score += EUC_KR_HANJA_AFTER_HANGUL_PENALTY;
+                            }
+                            _ => {}
+                        }
                         self.prev = LatinKorean::Hanja;
+                        self.current_word_len += 1;
+                        if self.current_word_len > 5 {
+                            score += EUC_KR_LONG_WORD_PENALTY;
+                        }
                     } else {
                         return None;
                     }
