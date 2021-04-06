@@ -76,7 +76,7 @@ const BIG5_SCORE_PER_LEVEL_1_HANZI: i64 = CJK_BASE_SCORE;
 
 const BIG5_SCORE_PER_OTHER_HANZI: i64 = CJK_SECONDARY_BASE_SCORE;
 
-const BIG5_PUA_PENALTY: i64 = -(CJK_BASE_SCORE * 40); // More severe than other PUA penalties to avoid misdetecting EUC-KR! (25 as the multiplier is too little)
+const BIG5_PUA_PENALTY: i64 = -(CJK_BASE_SCORE * 30); // More severe than other PUA penalties to avoid misdetecting EUC-KR! (25 as the multiplier is too little)
 
 const EUC_KR_SCORE_PER_EUC_HANGUL: i64 = CJK_BASE_SCORE + 1;
 
@@ -89,6 +89,8 @@ const EUC_KR_HANJA_AFTER_HANGUL_PENALTY: i64 = -(CJK_BASE_SCORE * 10);
 const EUC_KR_LONG_WORD_PENALTY: i64 = -6;
 
 const EUC_KR_PUA_PENALTY: i64 = GBK_PUA_PENALTY - 1; // Break tie in favor of GBK
+
+const EUC_KR_MAC_KOREAN_PENALTY: i64 = EUC_KR_PUA_PENALTY * 2;
 
 const GBK_SCORE_PER_LEVEL_1: i64 = CJK_BASE_SCORE;
 
@@ -1698,6 +1700,15 @@ impl EucKrCandidate {
                         if self.current_word_len > 5 {
                             score += EUC_KR_LONG_WORD_PENALTY;
                         }
+                    } else if (self.prev_byte == 0xA1
+                        || (self.prev_byte >= 0xA3 && self.prev_byte <= 0xA8)
+                        || (self.prev_byte >= 0xAA && self.prev_byte <= 0xAD))
+                        && (b >= 0x7B && b <= 0x7D)
+                    {
+                        // MacKorean symbols in range not part of code page 949
+                        score += EUC_KR_MAC_KOREAN_PENALTY;
+                        self.prev = LatinKorean::Other;
+                        self.current_word_len = 0;
                     } else {
                         return None;
                     }
