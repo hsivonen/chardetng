@@ -82,6 +82,8 @@ const BIG5_SCORE_PER_OTHER_HANZI: i64 = CJK_SECONDARY_BASE_SCORE;
 
 const BIG5_PUA_PENALTY: i64 = -(CJK_BASE_SCORE * 30); // More severe than other PUA penalties to avoid misdetecting EUC-KR! (25 as the multiplier is too little)
 
+const BIG5_SINGLE_BYTE_EXTENSION_PENALTY: i64 = -(CJK_BASE_SCORE * 40);
+
 const EUC_KR_SCORE_PER_EUC_HANGUL: i64 = CJK_BASE_SCORE + 1;
 
 const EUC_KR_SCORE_PER_NON_EUC_HANGUL: i64 = CJK_SECONDARY_BASE_SCORE / 5;
@@ -96,6 +98,8 @@ const EUC_KR_PUA_PENALTY: i64 = GBK_PUA_PENALTY - 1; // Break tie in favor of GB
 
 const EUC_KR_MAC_KOREAN_PENALTY: i64 = EUC_KR_PUA_PENALTY * 2;
 
+const EUC_KR_SINGLE_BYTE_EXTENSION_PENALTY: i64 = EUC_KR_MAC_KOREAN_PENALTY;
+
 const GBK_SCORE_PER_LEVEL_1: i64 = CJK_BASE_SCORE;
 
 const GBK_SCORE_PER_LEVEL_2: i64 = CJK_SECONDARY_BASE_SCORE;
@@ -103,6 +107,8 @@ const GBK_SCORE_PER_LEVEL_2: i64 = CJK_SECONDARY_BASE_SCORE;
 const GBK_SCORE_PER_NON_EUC: i64 = CJK_SECONDARY_BASE_SCORE / 4;
 
 const GBK_PUA_PENALTY: i64 = -(CJK_BASE_SCORE * 10); // Factor should be at least 2, but should it be larger?
+
+const GBK_SINGLE_BYTE_EXTENSION_PENALTY: i64 = GBK_PUA_PENALTY * 4;
 
 const CJK_LATIN_ADJACENCY_PENALTY: i64 = -CJK_BASE_SCORE; // smaller penalty than LATIN_ADJACENCY_PENALTY
 
@@ -1117,8 +1123,36 @@ impl GbkCandidate {
                 DecoderResult::InputEmpty => {
                     assert_eq!(read, 1);
                 }
-                DecoderResult::Malformed(_, _) => {
-                    return None;
+                DecoderResult::Malformed(malformed_len, _) => {
+                    if (self.prev_byte == 0xA0 || self.prev_byte == 0xFC || self.prev_byte == 0xFD)
+                        && (b < 0x80 || b == 0xFF)
+                    {
+                        // Mac OS Chinese Simplified single-byte that conflicts with code page GBK lead byte
+                        // followed by ASCII or a non-conflicting single-byte extension.
+                        self.pending_score = None; // Just in case
+                        score += GBK_SINGLE_BYTE_EXTENSION_PENALTY;
+                        if (b >= b'a' && b <= b'z') || (b >= b'A' && b <= b'Z') {
+                            self.prev = LatinCj::AsciiLetter;
+                        } else if b == 0xFF {
+                            score += GBK_SINGLE_BYTE_EXTENSION_PENALTY;
+                            self.prev = LatinCj::Other;
+                        } else {
+                            self.prev = LatinCj::Other;
+                        }
+                        // The GBK decoder has the pending ASCII concept, which is
+                        // a problem with this trickery, so let's reset the state.
+                        self.decoder = GBK.new_decoder_without_bom_handling();
+                    } else if malformed_len == 1 && b == 0xFF {
+                        // Mac OS Chinese Simplified single-byte extension that doesn't conflict with lead bytes
+                        self.pending_score = None; // Just in case
+                        score += GBK_SINGLE_BYTE_EXTENSION_PENALTY;
+                        self.prev = LatinCj::Other;
+                        // The GBK decoder has the pending ASCII concept, which is
+                        // a problem with this trickery, so let's reset the state.
+                        self.decoder = GBK.new_decoder_without_bom_handling();
+                    } else {
+                        return None;
+                    }
                 }
                 DecoderResult::OutputFull => {
                     unreachable!();
@@ -1292,6 +1326,10 @@ impl ShiftJisCandidate {
                             || (self.prev_byte == 0xFC && b >= 0xF5))
                     {
                         // Shift_JIS2004 or MacJapanese
+                        if let Some(pending) = self.pending_score {
+                            score += pending;
+                            self.pending_score = None;
+                        }
                         score += SHIFT_JIS_EXTENSION_PENALTY;
                         // Approximate boundary
                         if self.prev_byte < 0x87 {
@@ -1303,6 +1341,7 @@ impl ShiftJisCandidate {
                             self.prev = LatinCj::Cj;
                         }
                     } else if malformed_len == 1 && (b == 0xA0 || b >= 0xFD) {
+                        self.pending_score = None; // Just in case
                         score += SHIFT_JIS_SINGLE_BYTE_EXTENSION_PENALTY;
                         self.prev = LatinCj::Other;
                     } else {
@@ -1565,7 +1604,7 @@ impl Big5Candidate {
                 DecoderResult::InputEmpty => {
                     assert_eq!(read, 1);
                 }
-                DecoderResult::Malformed(_, _) => {
+                DecoderResult::Malformed(malformed_len, _) => {
                     if self.prev_byte >= 0x81
                         && self.prev_byte <= 0xFE
                         && ((b >= 0x40 && b <= 0x7E) || (b >= 0xA1 && b <= 0xFE))
@@ -1574,12 +1613,38 @@ impl Big5Candidate {
                         // Treat as PUA to avoid rejecting Big5-UAO, etc.
                         // We don't reprocess `b` even if ASCII, since it's
                         // logically part of the pair.
+                        if let Some(pending) = self.pending_score {
+                            score += pending;
+                            self.pending_score = None;
+                        }
                         score += BIG5_PUA_PENALTY;
                         // Assume Hanzi semantics
                         if self.prev == LatinCj::AsciiLetter {
                             score += CJK_LATIN_ADJACENCY_PENALTY;
                         }
                         self.prev = LatinCj::Cj;
+                    } else if (self.prev_byte == 0xA0
+                        || self.prev_byte == 0xFD
+                        || self.prev_byte == 0xFE)
+                        && (b < 0x80 || b == 0xFF)
+                    {
+                        // Mac OS Chinese Traditional single-byte that conflicts with code page Big5 lead byte
+                        // followed by ASCII or a non-conflicting single-byte extension.
+                        self.pending_score = None; // Just in case
+                        score += BIG5_SINGLE_BYTE_EXTENSION_PENALTY;
+                        if (b >= b'a' && b <= b'z') || (b >= b'A' && b <= b'Z') {
+                            self.prev = LatinCj::AsciiLetter;
+                        } else if b == 0xFF {
+                            score += BIG5_SINGLE_BYTE_EXTENSION_PENALTY;
+                            self.prev = LatinCj::Other;
+                        } else {
+                            self.prev = LatinCj::Other;
+                        }
+                    } else if malformed_len == 1 && b == 0xFF {
+                        // Mac OS Chinese Traditional single-byte extension that doesn't conflict with lead bytes
+                        self.pending_score = None; // Just in case
+                        score += BIG5_SINGLE_BYTE_EXTENSION_PENALTY;
+                        self.prev = LatinCj::Other;
                     } else {
                         return None;
                     }
@@ -1709,9 +1774,13 @@ impl EucKrCandidate {
                 DecoderResult::InputEmpty => {
                     assert_eq!(read, 1);
                 }
-                DecoderResult::Malformed(_, _) => {
+                DecoderResult::Malformed(malformed_len, _) => {
                     if (self.prev_byte == 0xC9 || self.prev_byte == 0xFE) && b >= 0xA1 && b <= 0xFE
                     {
+                        if let Some(pending) = self.pending_score {
+                            score += pending;
+                            self.pending_score = None;
+                        }
                         // The byte pair is in code page 949 EUDC range
                         score += EUC_KR_PUA_PENALTY;
                         // Assume Hanja semantics
@@ -1734,8 +1803,36 @@ impl EucKrCandidate {
                         || (self.prev_byte >= 0xAA && self.prev_byte <= 0xAD))
                         && (b >= 0x7B && b <= 0x7D)
                     {
+                        if let Some(pending) = self.pending_score {
+                            score += pending;
+                            self.pending_score = None;
+                        }
                         // MacKorean symbols in range not part of code page 949
                         score += EUC_KR_MAC_KOREAN_PENALTY;
+                        self.prev = LatinKorean::Other;
+                        self.current_word_len = 0;
+                    } else if (self.prev_byte == 0x81
+                        || self.prev_byte == 0x82
+                        || self.prev_byte == 0x83)
+                        && (b <= 0x80 || b == 0xFF)
+                    {
+                        // MacKorean single-byte that conflicts with code page 949 lead byte
+                        // followed by ASCII or a non-conflicting single-byte extension.
+                        self.pending_score = None; // Just in case
+                        score += EUC_KR_SINGLE_BYTE_EXTENSION_PENALTY;
+                        if (b >= b'a' && b <= b'z') || (b >= b'A' && b <= b'Z') {
+                            self.prev = LatinKorean::AsciiLetter;
+                        } else if b == 0x80 || b == 0xFF {
+                            score += EUC_KR_SINGLE_BYTE_EXTENSION_PENALTY;
+                            self.prev = LatinKorean::Other;
+                        } else {
+                            self.prev = LatinKorean::Other;
+                        }
+                        self.current_word_len = 0;
+                    } else if malformed_len == 1 && (b == 0x80 || b == 0xFF) {
+                        // MacKorean single-byte extensions that don't conflict with lead bytes
+                        self.pending_score = None; // Just in case
+                        score += EUC_KR_SINGLE_BYTE_EXTENSION_PENALTY;
                         self.prev = LatinKorean::Other;
                         self.current_word_len = 0;
                     } else {
