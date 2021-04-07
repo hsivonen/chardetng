@@ -80,6 +80,10 @@ const HALF_WIDTH_KATAKANA_PENALTY: i64 = -(CJK_BASE_SCORE * 3);
 
 const SHIFT_JIS_PUA_PENALTY: i64 = -(CJK_BASE_SCORE * 10); // Should this be larger?
 
+const SHIFT_JIS_EXTENSION_PENALTY: i64 = SHIFT_JIS_PUA_PENALTY * 2;
+
+const SHIFT_JIS_SINGLE_BYTE_EXTENSION_PENALTY: i64 = SHIFT_JIS_EXTENSION_PENALTY;
+
 const EUC_JP_SCORE_PER_KANA: i64 = CJK_BASE_SCORE + (CJK_BASE_SCORE / 3); // Relative to Big5
 
 const EUC_JP_SCORE_PER_NEAR_OBSOLETE_KANA: i64 = CJK_BASE_SCORE - 1;
@@ -1309,8 +1313,33 @@ impl ShiftJisCandidate {
                 DecoderResult::InputEmpty => {
                     assert_eq!(read, 1);
                 }
-                DecoderResult::Malformed(_, _) => {
-                    return None;
+                DecoderResult::Malformed(malformed_len, _) => {
+                    if (((self.prev_byte >= 0x81 && self.prev_byte <= 0x9F)
+                        || (self.prev_byte >= 0xE0 && self.prev_byte <= 0xFC))
+                        && ((b >= 0x40 && b <= 0x7E) || (b >= 0x80 && b <= 0xFC)))
+                        && !((self.prev_byte == 0x82 && b >= 0xFA)
+                            || (self.prev_byte == 0x84 && ((b >= 0xDD && b <= 0xE4) || b >= 0xFB))
+                            || (self.prev_byte == 0x86 && b >= 0xF2 && b <= 0xFA)
+                            || (self.prev_byte == 0x87 && b >= 0x77 && b <= 0x7B)
+                            || (self.prev_byte == 0xFC && b >= 0xF5))
+                    {
+                        // Shift_JIS2004 or MacJapanese
+                        score += SHIFT_JIS_EXTENSION_PENALTY;
+                        // Approximate boundary
+                        if self.prev_byte < 0x87 {
+                            self.prev = LatinCj::Other;
+                        } else {
+                            if self.prev == LatinCj::AsciiLetter {
+                                score += CJK_LATIN_ADJACENCY_PENALTY;
+                            }
+                            self.prev = LatinCj::Cj;
+                        }
+                    } else if malformed_len == 1 && (b == 0xA0 || b >= 0xFD) {
+                        score += SHIFT_JIS_SINGLE_BYTE_EXTENSION_PENALTY;
+                        self.prev = LatinCj::Other;
+                    } else {
+                        return None;
+                    }
                 }
                 DecoderResult::OutputFull => {
                     unreachable!();
