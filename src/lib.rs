@@ -76,6 +76,8 @@ const EUC_JP_SCORE_PER_OTHER_KANJI: i64 = CJK_SECONDARY_BASE_SCORE / 4;
 
 const EUC_JP_INITIAL_KANA_PENALTY: i64 = -((CJK_BASE_SCORE / 3) + 1);
 
+const EUC_JP_EXTENSION_PENALTY: i64 = -(CJK_BASE_SCORE * 50); // Needs to be more severe than for Shift_JIS to avoid misdetecting EUC-KR!
+
 const BIG5_SCORE_PER_LEVEL_1_HANZI: i64 = CJK_BASE_SCORE;
 
 const BIG5_SCORE_PER_OTHER_HANZI: i64 = CJK_SECONDARY_BASE_SCORE;
@@ -1467,7 +1469,32 @@ impl EucJpCandidate {
                     assert_eq!(read, 1);
                 }
                 DecoderResult::Malformed(_, _) => {
-                    return None;
+                    if b >= 0xA1
+                        && b <= 0xFE
+                        && self.prev_byte >= 0xA1
+                        && self.prev_byte <= 0xFE
+                        && ((self.prev_prev_byte != 0x8F
+                            && !(self.prev_byte == 0xA8 && b >= 0xE0 && b <= 0xE6)
+                            && !(self.prev_byte == 0xAC && b >= 0xF4 && b <= 0xFC)
+                            && !(self.prev_byte == 0xAD && b >= 0xD8 && b <= 0xDE))
+                            || (self.prev_prev_byte == 0x8F
+                                && self.prev_byte != 0xA2
+                                && self.prev_byte != 0xA6
+                                && self.prev_byte != 0xA7
+                                && self.prev_byte != 0xA9
+                                && self.prev_byte != 0xAA
+                                && self.prev_byte != 0xAB
+                                && self.prev_byte != 0xED
+                                && !(self.prev_byte == 0xFE && b >= 0xF7)))
+                    {
+                        score += EUC_JP_EXTENSION_PENALTY;
+                        if self.prev == LatinCj::AsciiLetter {
+                            score += CJK_LATIN_ADJACENCY_PENALTY;
+                        }
+                        self.prev = LatinCj::Cj;
+                    } else {
+                        return None;
+                    }
                 }
                 DecoderResult::OutputFull => {
                     unreachable!();
