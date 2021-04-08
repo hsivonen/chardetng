@@ -141,6 +141,10 @@ In general `chardetng` prefers to do negative matching (rule out possibilities f
 
 ## Release Notes
 
+### 0.1.11
+
+* Tolerate Windows and Classic Mac OS extensions to legacy CJK encodings and tolerate JIS X 0213 extensions to Shift_JIS and EUC-JP (not ISO-2022-JP).
+
 ### 0.1.10
 
 * Stop computing extra scores for common CJK characters after enough extra-score-eligible characters have been seen. (Improves performance with long CJK inputs.)
