@@ -1152,7 +1152,7 @@ impl GbkCandidate {
                     assert_eq!(read, 1);
                 }
                 DecoderResult::Malformed(malformed_len, _) => {
-                    if (self.prev_byte == 0xA0 || self.prev_byte == 0xFC || self.prev_byte == 0xFD)
+                    if (self.prev_byte == 0xA0 || self.prev_byte == 0xFE || self.prev_byte == 0xFD)
                         && (b < 0x80 || b == 0xFF)
                     {
                         // Mac OS Chinese Simplified single-byte that conflicts with code page GBK lead byte
@@ -1356,7 +1356,7 @@ impl ShiftJisCandidate {
                         && !((self.prev_byte == 0x82 && b >= 0xFA)
                             || (self.prev_byte == 0x84 && ((b >= 0xDD && b <= 0xE4) || b >= 0xFB))
                             || (self.prev_byte == 0x86 && b >= 0xF2 && b <= 0xFA)
-                            || (self.prev_byte == 0x87 && b >= 0x77 && b <= 0x7B)
+                            || (self.prev_byte == 0x87 && b >= 0x77 && b <= 0x7D)
                             || (self.prev_byte == 0xFC && b >= 0xF5))
                     {
                         // Shift_JIS2004 or MacJapanese
@@ -1510,7 +1510,7 @@ impl EucJpCandidate {
                         && self.prev_byte >= 0xA1
                         && self.prev_byte <= 0xFE
                         && ((self.prev_prev_byte != 0x8F
-                            && !(self.prev_byte == 0xA8 && b >= 0xE0 && b <= 0xE6)
+                            && !(self.prev_byte == 0xA8 && b >= 0xDF && b <= 0xE6)
                             && !(self.prev_byte == 0xAC && b >= 0xF4 && b <= 0xFC)
                             && !(self.prev_byte == 0xAD && b >= 0xD8 && b <= 0xDE))
                             || (self.prev_prev_byte == 0x8F
@@ -1878,9 +1878,7 @@ impl EucKrCandidate {
                         score += EUC_KR_MAC_KOREAN_PENALTY;
                         self.prev = LatinKorean::Other;
                         self.current_word_len = 0;
-                    } else if (self.prev_byte == 0x81
-                        || self.prev_byte == 0x82
-                        || self.prev_byte == 0x83)
+                    } else if (self.prev_byte >= 0x81 && self.prev_byte <= 0x84)
                         && (b <= 0x80 || b == 0xFF)
                     {
                         // MacKorean single-byte that conflicts with code page 949 lead byte
@@ -3635,6 +3633,16 @@ mod tests {
     }
 
     #[test]
+    fn test_euc_kr_single_byte_84() {
+        let mut v = Vec::new();
+        v.extend_from_slice(b"\x84 ");
+        for _ in 0..40 {
+            v.extend_from_slice(b"\xC5\xD7\xBD\xBA\xC6\xAE. ");
+        }
+        check_bytes(&v, EUC_KR);
+    }
+
+    #[test]
     fn test_not_euc_kr() {
         let mut v = Vec::new();
         v.extend_from_slice(b"\xC9\xA0\xB0\xA1 ");
@@ -3675,6 +3683,16 @@ mod tests {
     }
 
     #[test]
+    fn test_not_shift_jis_bis() {
+        let mut v = Vec::new();
+        v.extend_from_slice(b"\x87\x7D");
+        for _ in 0..40 {
+            v.extend_from_slice(b"\x82\xC9\x82\xD9\x82\xF1\x82\xB2");
+        }
+        check_bytes(&v, GBK);
+    }
+
+    #[test]
     fn test_euc_jp_x0213() {
         let mut v = Vec::new();
         v.extend_from_slice(b"\xAD\xBF");
@@ -3705,6 +3723,16 @@ mod tests {
     }
 
     #[test]
+    fn test_not_euc_jp_bis() {
+        let mut v = Vec::new();
+        v.extend_from_slice(b"\xA8\xDF");
+        for _ in 0..80 {
+            v.extend_from_slice(b"\xA4\xCB\xA4\xDB\xA4\xF3\xA4\xB4");
+        }
+        check_bytes(&v, BIG5);
+    }
+
+    #[test]
     fn test_gbk_single_byte_ff() {
         let mut v = Vec::new();
         v.extend_from_slice(b"\xFF");
@@ -3722,5 +3750,25 @@ mod tests {
             v.extend_from_slice(b"\xB5\xC4");
         }
         check_bytes(&v, GBK);
+    }
+
+    #[test]
+    fn test_gbk_single_byte_fe() {
+        let mut v = Vec::new();
+        v.extend_from_slice(b"\xFE ");
+        for _ in 0..80 {
+            v.extend_from_slice(b"\xB5\xC4");
+        }
+        check_bytes(&v, GBK);
+    }
+
+    #[test]
+    fn test_not_gbk_single_byte_fc() {
+        let mut v = Vec::new();
+        v.extend_from_slice(b"\xFC ");
+        for _ in 0..80 {
+            v.extend_from_slice(b"\xB5\xC4");
+        }
+        check_bytes(&v, ISO_8859_5);
     }
 }
