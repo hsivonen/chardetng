@@ -128,18 +128,25 @@ In general `chardetng` prefers to do negative matching (rule out possibilities f
 
 ## Roadmap
 
+No planned improvements.
+
 - [x] Investigate parallelizing the `feed` method using Rayon.
 - [x] Improve windows-874 detection for short inputs.
-- [ ] Improve GBK detection for short inputs.
-- [ ] Reorganize the frequency data for telling short GBK, EUC-JP, and EUC-KR inputs apart.
-- [ ] Make Lithuanian and Latvian detection on generic domains a lot more accurate (likely requires looking at trigrams).
+- [ ] ~Improve GBK detection for short inputs.~
+- [ ] ~Reorganize the frequency data for telling short GBK, EUC-JP, and EUC-KR inputs apart.~
+- [ ] ~Make Lithuanian and Latvian detection on generic domains a lot more accurate (likely requires looking at trigrams).~
 - [x] Tune Central European detection.
-- [ ] Tune the penalties applied to confusable encodings on non-generic TLDs to make detection of confusable encodings possible on non-generic TLDs.
+- [ ] ~Tune the penalties applied to confusable encodings on non-generic TLDs to make detection of confusable encodings possible on non-generic TLDs.~
 - [x] Reduce the binary size by not storing the scoring for implausible-next-to-alphabetic character classes.
 - [ ] ~Reduce the binary size by classifying ASCII algorithmically.~
-- [ ] Reduce the binary size by not storing the scores for C1 controls.
+- [ ] ~Reduce the binary size by not storing the scores for C1 controls.~
 
 ## Release Notes
+
+### 0.1.13
+
+* Undo the limit on CJK extra scoring (from version 0.1.10). This change never made it to Gecko and, therefore, wasn't validated with in-practice telemetry.
+* Detect inputs that have a lot of half-width katakana.
 
 ### 0.1.12
 
