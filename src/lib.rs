@@ -2945,6 +2945,14 @@ impl EncodingDetector {
     /// to lower-case it. Full DNS label validation is intentionally not performed
     /// to avoid panics when the reality doesn't match the specs.)
     pub fn guess(&self, tld: Option<&[u8]>, allow_utf8: bool) -> &'static Encoding {
+        self.guess_assess(tld, allow_utf8).0
+    }
+
+    /// Same as `guess()`, but also returns a Boolean indicating
+    /// whether the guessed encoding had a higher score than at least
+    /// one other candidate. If this method returns `false`, the
+    /// guessed encoding is likely to be wrong.
+    pub fn guess_assess(&self, tld: Option<&[u8]>, allow_utf8: bool) -> (&'static Encoding, bool) {
         let mut tld_type = tld.map_or(Tld::Generic, |tld| {
             assert!(!contains_upper_case_period_or_non_ascii(tld));
             classify_tld(tld)
@@ -2954,18 +2962,18 @@ impl EncodingDetector {
             && self.esc_seen
             && self.candidates[Self::ISO_2022_JP_INDEX].score.is_some()
         {
-            return ISO_2022_JP;
+            return (ISO_2022_JP, true);
         }
 
         if self.candidates[Self::UTF_8_INDEX].score.is_some() {
             if allow_utf8 {
-                return UTF_8;
+                return (UTF_8, true);
             }
             // Various test cases that prohibit UTF-8 detection want to
             // see windows-1252 specifically. These tests run on generic
             // domains. However, if we returned windows-1252 on
             // some non-generic domains, we'd cause reloads.
-            return self.candidates[encoding_for_tld(tld_type)].encoding();
+            return (self.candidates[encoding_for_tld(tld_type)].encoding(), true);
         }
 
         let mut encoding = self.candidates[encoding_for_tld(tld_type)].encoding();
@@ -3028,8 +3036,7 @@ impl EncodingDetector {
                 encoding = ISO_8859_8;
             }
         }
-
-        encoding
+        (encoding, max >= 0)
     }
 
     // XXX Test-only API
@@ -3374,6 +3381,12 @@ mod tests {
     #[test]
     fn test_de() {
         check("Straße", WINDOWS_1252);
+    }
+
+    #[test]
+    fn test_en_windows1252() {
+        // "Don't "
+        check_bytes(&[68, 111, 110, 180, 116, 32], WINDOWS_1252);
     }
 
     #[test]
