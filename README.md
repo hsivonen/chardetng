@@ -143,6 +143,11 @@ No planned improvements.
 
 ## Release Notes
 
+### 0.1.14
+
+* Add `guess_assess` that provides more information about the guess.
+* Upgrade the `cfg-if` dependency to 1.0.
+
 ### 0.1.13
 
 * Undo the limit on CJK extra scoring (from version 0.1.10). This change never made it to Gecko and, therefore, wasn't validated with in-practice telemetry.
