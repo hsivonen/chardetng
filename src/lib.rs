@@ -12,6 +12,8 @@
 //! It is optimized for binary size in applications that already depend
 //! on `encoding_rs` for other reasons.
 
+#![no_std]
+
 #[cfg(feature = "multithreading")]
 use rayon::prelude::*;
 

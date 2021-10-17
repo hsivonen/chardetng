@@ -35,6 +35,10 @@ This crate aims to be more accurate than ICU, more complete than `chardet`, more
 
 Enabling the optional feature `multithreading` makes `chardetng` run the detectors for individual encodings in parallel. Unfortunately, the performance doesn't scale linearly with CPU cores, but it's still better than single-threaded performance in terms of wall-clock time if a single instance of `chardetng` is running. In terms of combined CPU core usage, the `multithreading` mode is quite a bit worse than the single-threaded more, so if you can find a parallelization point at some higher-level task such that you could have multiple instances of `chardetng` running in paraller each on a single thread, you'll get better results doing that.
 
+## `no_std` support
+
+`chardetng` works in a `no_std` environment that does not have an allocator.
+
 ## Principle of Operation
 
 In general `chardetng` prefers to do negative matching (rule out possibilities from the set of plausible encodings) than to do positive matching. Since negative matching is insufficient, there is positive matching, too.
@@ -142,6 +146,10 @@ No planned improvements.
 - [ ] ~Reduce the binary size by not storing the scores for C1 controls.~
 
 ## Release Notes
+
+### 0.1.15
+
+* Make the crate work in `no_std` without an allocator.
 
 ### 0.1.14
 
