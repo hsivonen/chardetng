@@ -147,6 +147,10 @@ No planned improvements.
 
 ## Release Notes
 
+### 0.1.16
+
+* Detect windows-1252 copyright sign surrounded by spaces as windows-1252.
+
 ### 0.1.15
 
 * Make the crate work in `no_std` without an allocator.
