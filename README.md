@@ -147,6 +147,10 @@ No planned improvements.
 
 ## Release Notes
 
+### 0.1.17
+
+* Handle non-space space-like bytes following a windows-1252 copyright sign.
+
 ### 0.1.16
 
 * Detect windows-1252 copyright sign surrounded by spaces as windows-1252.
