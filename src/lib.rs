@@ -29,7 +29,6 @@ use core::arch::x86::_mm_movemask_epi8;
 use core::arch::x86_64::__m128i;
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
 use core::arch::x86_64::_mm_movemask_epi8;
-use core::panicking::panic;
 
 use encoding_rs::Decoder;
 use encoding_rs::DecoderResult;
@@ -49,7 +48,7 @@ mod tld;
 use data::*;
 use tld::classify_tld;
 use tld::Tld;
-use crate::EncodingFilterType::{Blacklist, Whitelist};
+use EncodingFilterType::{Blacklist, Whitelist};
 
 const LATIN_ADJACENCY_PENALTY: i64 = -50;
 
@@ -3026,6 +3025,11 @@ impl EncodingDetector {
         }
     }
 
+    /// Same as `guess_asses`, but only guesses among the encoding that the given `filter` allows.
+    ///
+    /// # Panics
+    ///
+    /// If `filter` doesn't allow any encoding.
     pub fn guess_among(&self, tld: Option<&[u8]>, filter: &EncodingFilter) -> (&'static Encoding, bool) {
         let mut tld_type = tld.map_or(Tld::Generic, |tld| {
             assert!(!contains_upper_case_period_or_non_ascii(tld));
