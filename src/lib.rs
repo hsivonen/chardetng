@@ -3123,7 +3123,7 @@ impl EncodingDetector {
             }
         }
 
-        if filter.is_allowed(encoding) {
+        if !filter.is_allowed(encoding) {
             panic!("can't guess an encoding: the given encoding filter is blocking all encodings");
         }
 
