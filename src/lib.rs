@@ -3058,7 +3058,14 @@ impl EncodingDetector {
             }
         }
 
-        let mut encoding = self.candidates[encoding_for_tld(tld_type)].encoding();
+        let encoding_for_tld = self.candidates[encoding_for_tld(tld_type)].encoding();
+        let mut encoding =
+            if filter.is_allowed(encoding_for_tld) {
+                Some(encoding_for_tld)
+            } else {
+                None
+            };
+
         let mut max = 0i64;
         let mut expectation_is_valid = false;
         if tld_type != Tld::Generic {
@@ -3104,28 +3111,30 @@ impl EncodingDetector {
                 continue;
             }
             if let Some(score) = candidate.score(i, tld_type, expectation_is_valid) {
-                if score > max {
+                if score > max || encoding.is_none() {
                     max = score;
-                    encoding = candidate.encoding();
+                    encoding = Some(candidate.encoding());
                 }
+            } else if encoding.is_none() {
+                // If the encoding is not already set, initialize it to something so the function
+                // can return a value (even if the score is None).
+                encoding = Some(candidate.encoding());
             }
         }
         let visual = &self.candidates[Self::VISUAL_INDEX];
         if let Some(visual_score) = visual.score(Self::VISUAL_INDEX, tld_type, expectation_is_valid)
         {
-            if (visual_score > max || encoding == WINDOWS_1255)
+            if (visual_score > max || encoding.map_or(false, |e| e == WINDOWS_1255))
                 && visual.plausible_punctuation()
                     > self.candidates[Self::LOGICAL_INDEX].plausible_punctuation()
                 && filter.is_allowed(&ISO_8859_8)
             {
                 // max = visual_score;
-                encoding = ISO_8859_8;
+                encoding = Some(ISO_8859_8);
             }
         }
 
-        if !filter.is_allowed(encoding) {
-            panic!("can't guess an encoding: the given encoding filter is blocking all encodings");
-        }
+        let encoding = encoding.expect("can't guess an encoding: the given encoding filter is blocking all encodings");
 
         (encoding, max >= 0)
     }
