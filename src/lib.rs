@@ -3230,12 +3230,15 @@ mod tests {
     use encoding_rs::WINDOWS_1258;
     use encoding_rs::WINDOWS_874;
 
+    extern crate std;
+    use std::string::String;
+    use std::vec::Vec;
+
     fn check_bytes(bytes: &[u8], encoding: &'static Encoding) {
         let mut det = EncodingDetector::new();
         det.feed(bytes, true);
         let enc = det.guess(None, false);
         let (decoded, _) = enc.decode_without_bom_handling(bytes);
-        println!("{:?}", decoded);
         assert_eq!(enc, encoding);
     }
 
