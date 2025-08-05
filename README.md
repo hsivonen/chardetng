@@ -150,6 +150,8 @@ No planned improvements.
 ### 1.0.0
 
 * Add method `tld_may_affect_guess`.
+* Make `cargo test` work.
+* Update `arrayvec`. (used only by the `multithreading` feature.)
 
 ### 0.1.17
 

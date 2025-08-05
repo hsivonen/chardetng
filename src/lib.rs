@@ -2857,7 +2857,7 @@ impl EncodingDetector {
                 // performing thread synchronization only to bail
                 // out immediately when trying a disqualified
                 // candidate.
-                let mut qualified = ArrayVec::<[_; 27]>::new();
+                let mut qualified = ArrayVec::<&mut Candidate, 27>::new();
                 for candidate in self.candidates.iter_mut() {
                     if candidate.qualified() {
                         qualified.push(candidate);
