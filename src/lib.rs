@@ -48,6 +48,7 @@ mod tld;
 use data::*;
 use tld::classify_tld;
 use tld::Tld;
+use EncodingFilterType::{Blacklist, Whitelist};
 
 const LATIN_ADJACENCY_PENALTY: i64 = -50;
 
@@ -2823,6 +2824,47 @@ impl BeforeNonAscii {
     }
 }
 
+enum EncodingFilterType {
+    Whitelist,
+    Blacklist,
+}
+
+pub struct EncodingFilter<'a> {
+    filter_type: EncodingFilterType,
+    encodings: &'a[&'a Encoding],
+}
+
+impl <'a> EncodingFilter<'a> {
+    pub fn allow_only(encodings: &'a[&'a Encoding]) -> Self {
+        Self {
+            filter_type: Whitelist,
+            encodings,
+        }
+    }
+
+    pub fn allow_all_except(encodings: &'a[&'a Encoding]) -> Self {
+        Self {
+            filter_type: Blacklist,
+            encodings,
+        }
+    }
+
+    pub fn allow_all() -> Self {
+        Self {
+            filter_type: Blacklist,
+            encodings: &[],
+        }
+    }
+
+    pub fn is_allowed(&self, encoding: &Encoding) -> bool {
+        let found = self.encodings.contains(&encoding);
+        match self.filter_type {
+            Whitelist => found,
+            Blacklist => !found,
+        }
+    }
+}
+
 /// A Web browser-oriented detector for guessing what character
 /// encoding a stream of bytes is encoded in.
 ///
@@ -2973,6 +3015,19 @@ impl EncodingDetector {
     /// one other candidate. If this method returns `false`, the
     /// guessed encoding is likely to be wrong.
     pub fn guess_assess(&self, tld: Option<&[u8]>, allow_utf8: bool) -> (&'static Encoding, bool) {
+        if allow_utf8 {
+            self.guess_among(tld, &EncodingFilter::allow_all())
+        } else {
+            self.guess_among(tld, &EncodingFilter::allow_all_except(&[UTF_8]))
+        }
+    }
+
+    /// Same as `guess_asses`, but only guesses among the encoding that the given `filter` allows.
+    ///
+    /// # Panics
+    ///
+    /// If `filter` doesn't allow any encoding.
+    pub fn guess_among(&self, tld: Option<&[u8]>, filter: &EncodingFilter) -> (&'static Encoding, bool) {
         let mut tld_type = tld.map_or(Tld::Generic, |tld| {
             assert!(!contains_upper_case_period_or_non_ascii(tld));
             classify_tld(tld)
@@ -2981,22 +3036,33 @@ impl EncodingDetector {
         if self.non_ascii_seen == 0
             && self.esc_seen
             && self.candidates[Self::ISO_2022_JP_INDEX].score.is_some()
+            && filter.is_allowed(&ISO_2022_JP)
         {
             return (ISO_2022_JP, true);
         }
 
         if self.candidates[Self::UTF_8_INDEX].score.is_some() {
-            if allow_utf8 {
+            if filter.is_allowed(&UTF_8) {
                 return (UTF_8, true);
             }
             // Various test cases that prohibit UTF-8 detection want to
             // see windows-1252 specifically. These tests run on generic
             // domains. However, if we returned windows-1252 on
             // some non-generic domains, we'd cause reloads.
-            return (self.candidates[encoding_for_tld(tld_type)].encoding(), true);
+            let encoding = self.candidates[encoding_for_tld(tld_type)].encoding();
+            if filter.is_allowed(&encoding) {
+                return (encoding, true);
+            }
         }
 
-        let mut encoding = self.candidates[encoding_for_tld(tld_type)].encoding();
+        let encoding_for_tld = self.candidates[encoding_for_tld(tld_type)].encoding();
+        let mut encoding =
+            if filter.is_allowed(encoding_for_tld) {
+                Some(encoding_for_tld)
+            } else {
+                None
+            };
+
         let mut max = 0i64;
         let mut expectation_is_valid = false;
         if tld_type != Tld::Generic {
@@ -3038,24 +3104,35 @@ impl EncodingDetector {
             }
         }
         for (i, candidate) in self.candidates.iter().enumerate().skip(Self::FIRST_NORMAL) {
+            if !filter.is_allowed(&candidate.encoding()) {
+                continue;
+            }
             if let Some(score) = candidate.score(i, tld_type, expectation_is_valid) {
-                if score > max {
+                if score > max || encoding.is_none() {
                     max = score;
-                    encoding = candidate.encoding();
+                    encoding = Some(candidate.encoding());
                 }
+            } else if encoding.is_none() {
+                // If the encoding is not already set, initialize it to something so the function
+                // can return a value (even if the score is None).
+                encoding = Some(candidate.encoding());
             }
         }
         let visual = &self.candidates[Self::VISUAL_INDEX];
         if let Some(visual_score) = visual.score(Self::VISUAL_INDEX, tld_type, expectation_is_valid)
         {
-            if (visual_score > max || encoding == WINDOWS_1255)
+            if (visual_score > max || encoding.map_or(false, |e| e == WINDOWS_1255))
                 && visual.plausible_punctuation()
                     > self.candidates[Self::LOGICAL_INDEX].plausible_punctuation()
+                && filter.is_allowed(&ISO_8859_8)
             {
                 // max = visual_score;
-                encoding = ISO_8859_8;
+                encoding = Some(ISO_8859_8);
             }
         }
+
+        let encoding = encoding.expect("can't guess an encoding: the given encoding filter is blocking all encodings");
+
         (encoding, max >= 0)
     }
 
