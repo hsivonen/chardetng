@@ -147,6 +147,10 @@ No planned improvements.
 
 ## Release Notes
 
+### 1.0.0
+
+* Add method `tld_may_affect_guess`.
+
 ### 0.1.17
 
 * Handle non-space space-like bytes following a windows-1252 copyright sign.

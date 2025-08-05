@@ -3204,14 +3204,32 @@ impl EncodingDetector {
             closed: false,
         }
     }
+
+    /// Queries whether the TLD is considered non-generic and could affect the guess.
+    ///
+    /// # Panics
+    ///
+    /// If `tld` contains non-ASCII, period, or upper-case letters. (The panic
+    /// condition is intentionally limited to signs of failing to extract the
+    /// label correctly, failing to provide it in its Punycode form, and failure
+    /// to lower-case it. Full DNS label validation is intentionally not performed
+    /// to avoid panics when the reality doesn't match the specs.)
+    pub fn tld_may_affect_guess(tld: Option<&[u8]>) -> bool {
+        if let Some(tld) = tld {
+            assert!(!contains_upper_case_period_or_non_ascii(tld));
+            classify_tld(tld) != Tld::Generic
+        } else {
+            false
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     extern crate alloc;
     use super::*;
-    use alloc::vec::Vec;
     use alloc::string::String;
+    use alloc::vec::Vec;
     use detone::IterDecomposeVietnamese;
     use encoding_rs::IBM866;
     use encoding_rs::ISO_8859_2;
