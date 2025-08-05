@@ -26,3 +26,6 @@ encoding_rs = { version = "0.8.29", features = ["alloc"] }
 [features]
 testing-only-no-semver-guarantees-do-not-use = []
 multithreading = ["rayon", "arrayvec"]
+
+[badges]
+maintenance = { status = "passively-maintained" }

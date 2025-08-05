@@ -132,7 +132,7 @@ In general `chardetng` prefers to do negative matching (rule out possibilities f
 
 ## Roadmap
 
-No planned improvements.
+Improvements to detection results are not planned, and isolated examples of misdetection are very unlikely to result in changes.
 
 - [x] Investigate parallelizing the `feed` method using Rayon.
 - [x] Improve windows-874 detection for short inputs.
