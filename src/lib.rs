@@ -3208,7 +3208,10 @@ impl EncodingDetector {
 
 #[cfg(test)]
 mod tests {
+    extern crate alloc;
     use super::*;
+    use alloc::vec::Vec;
+    use alloc::string::String;
     use detone::IterDecomposeVietnamese;
     use encoding_rs::IBM866;
     use encoding_rs::ISO_8859_2;
@@ -3231,8 +3234,6 @@ mod tests {
         let mut det = EncodingDetector::new();
         det.feed(bytes, true);
         let enc = det.guess(None, false);
-        let (decoded, _) = enc.decode_without_bom_handling(bytes);
-        println!("{:?}", decoded);
         assert_eq!(enc, encoding);
     }
 
