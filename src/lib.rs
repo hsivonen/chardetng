@@ -1478,9 +1478,6 @@ impl EucJpCandidate {
                 let u = dst[0];
                 if !self.non_ascii_seen && u >= 0x80 {
                     self.non_ascii_seen = true;
-                    if u >= 0xFF61 && u <= 0xFF9F {
-                        // return None;
-                    }
                     if u >= 0x3040 && u < 0x3100 {
                         // Remove the kana advantage over initial Big5
                         // hanzi.
