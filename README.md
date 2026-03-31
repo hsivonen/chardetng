@@ -2,14 +2,14 @@
 
 [![crates.io](https://img.shields.io/crates/v/chardetng.svg)](https://crates.io/crates/chardetng)
 [![docs.rs](https://docs.rs/chardetng/badge.svg)](https://docs.rs/chardetng/)
-[![Apache 2 / MIT dual-licensed](https://img.shields.io/badge/license-Apache%202%20%2F%20MIT-blue.svg)](https://github.com/hsivonen/chardetng/blob/master/COPYRIGHT)
+[![Apache 2 / MIT dual-licensed](https://img.shields.io/badge/license-Apache%202%20%2F%20MIT-blue.svg)](https://github.com/hsivonen/chardetng/blob/main/COPYRIGHT)
 
 A character encoding detector for legacy Web content.
 
 ## Licensing
 
 Please see the file named
-[COPYRIGHT](https://github.com/hsivonen/chardetng/blob/master/COPYRIGHT).
+[COPYRIGHT](https://github.com/hsivonen/chardetng/blob/main/COPYRIGHT).
 
 ## Documentation
 
