@@ -36,6 +36,7 @@ use encoding_rs::Encoding;
 use encoding_rs::BIG5;
 use encoding_rs::EUC_JP;
 use encoding_rs::EUC_KR;
+use encoding_rs::GB18030;
 use encoding_rs::GBK;
 use encoding_rs::ISO_2022_JP;
 use encoding_rs::ISO_8859_8;
@@ -141,7 +142,12 @@ const GBK_SCORE_PER_LEVEL_2: i64 = CJK_SECONDARY_BASE_SCORE;
 
 const GBK_SCORE_PER_NON_EUC: i64 = CJK_SECONDARY_BASE_SCORE / 4;
 
+// GB 18030 4-byte sequences (producing surrogate pairs) are unique to GB 18030
+// and should be scored highly to distinguish from GBK/other encodings
+const GB18030_FOUR_BYTE_BONUS: i64 = CJK_BASE_SCORE * 5;
+
 const GBK_PUA_PENALTY: i64 = -(CJK_BASE_SCORE * 10); // Factor should be at least 2, but should it be larger?
+const GB18030_PUA_PENALTY: i64 = -(CJK_BASE_SCORE);
 
 const GBK_SINGLE_BYTE_EXTENSION_PENALTY: i64 = GBK_PUA_PENALTY * 4;
 
@@ -1118,7 +1124,7 @@ impl GbkCandidate {
                             self.prev = LatinCj::Cj;
                         }
                         _ => {
-                            score += GBK_PUA_PENALTY;
+                            score += GB18030_PUA_PENALTY;
                             self.prev = LatinCj::Other;
                         }
                     }
@@ -1159,11 +1165,13 @@ impl GbkCandidate {
                     self.pending_score = None;
                 }
                 let u = dst[0];
+                // Maps to supplementary PUA (planes 15-16)
                 if u >= 0xDB80 && u <= 0xDBFF {
                     score += GBK_PUA_PENALTY;
                     self.prev = LatinCj::Other;
-                } else if u >= 0xD480 && u < 0xD880 {
-                    score += GBK_SCORE_PER_NON_EUC;
+                // supplementary planes 1-14
+                } else if u >= 0xD800 && u < 0xDB80 {
+                    score += GB18030_FOUR_BYTE_BONUS;
                     if self.prev == LatinCj::AsciiLetter {
                         score += CJK_LATIN_ADJACENCY_PENALTY;
                     }
@@ -1195,7 +1203,7 @@ impl GbkCandidate {
                         }
                         // The GBK decoder has the pending ASCII concept, which is
                         // a problem with this trickery, so let's reset the state.
-                        self.decoder = GBK.new_decoder_without_bom_handling();
+                        self.decoder = GB18030.new_decoder_without_bom_handling();
                     } else if malformed_len == 1 && b == 0xFF {
                         // Mac OS Chinese Simplified single-byte extension that doesn't conflict with lead bytes
                         self.pending_score = None; // Just in case
@@ -1203,7 +1211,7 @@ impl GbkCandidate {
                         self.prev = LatinCj::Other;
                         // The GBK decoder has the pending ASCII concept, which is
                         // a problem with this trickery, so let's reset the state.
-                        self.decoder = GBK.new_decoder_without_bom_handling();
+                        self.decoder = GB18030.new_decoder_without_bom_handling();
                     } else {
                         return None;
                     }
@@ -2635,7 +2643,7 @@ impl Candidate {
     fn new_gbk() -> Self {
         Candidate {
             inner: InnerCandidate::Gbk(GbkCandidate {
-                decoder: GBK.new_decoder_without_bom_handling(),
+                decoder: GB18030.new_decoder_without_bom_handling(),
                 prev: LatinCj::Other,
                 prev_byte: 0,
                 pending_score: None,
@@ -3499,6 +3507,12 @@ mod tests {
     #[test]
     fn test_simplified() {
         check("这是一个字符编码测试。", GBK);
+    }
+
+    #[test]
+    fn test_gb18030() {
+        let bytes = encoding_rs::GB18030.encode("数据库名：c播拨龾龿珳珴𬀩𬀪").0;
+        check_bytes(&bytes, GBK);
     }
 
     #[test]
