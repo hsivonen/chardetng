@@ -2966,8 +2966,52 @@ impl EncodingDetector {
         } else {
             0
         };
-        self.feed_impl(&buffer[start..], last);
+        self.feed_skipping_inert_ascii(&buffer[start..], last);
         self.non_ascii_seen != 0
+    }
+
+    /// Feeds `buffer` to the candidates, leaving out the middle of long
+    /// ASCII runs after non-ASCII, which no candidate is affected by.
+    ///
+    /// No candidate scores a pair of ASCII bytes, and a few ASCII bytes
+    /// into a run, the state of every candidate depends only on the last
+    /// couple of bytes, except for the windows-1252 ordinal state, which
+    /// lasts across letters and digits, and is reset by any other ASCII byte
+    /// except the period. So, of each run, it is enough to feed the first
+    /// `KEEP` bytes and everything from the last such reset byte that leaves
+    /// `KEEP` bytes after it.
+    fn feed_skipping_inert_ascii(&mut self, buffer: &[u8], last: bool) {
+        const KEEP: usize = 8;
+        // Shorter skips do not pay for their extra feed_impl() call.
+        const MIN_SKIP: usize = 8;
+        const MIN_RUN: usize = 2 * KEEP + MIN_SKIP + 1;
+        let mut fed = 0;
+        // The ISO-2022-JP decoder gives meaning to ASCII, so skipping must
+        // wait until a non-ASCII byte has disqualified it.
+        let mut run_start = if self.non_ascii_seen == 0 {
+            Encoding::ascii_valid_up_to(buffer) + 1
+        } else {
+            0
+        };
+        while let Some(window) = buffer.get(run_start..run_start + MIN_RUN) {
+            if let Some(non_ascii) = window.iter().rposition(|&b| b >= 0x80) {
+                run_start += non_ascii + 1;
+                continue;
+            }
+            let run_len = MIN_RUN + Encoding::ascii_valid_up_to(&buffer[run_start + MIN_RUN..]);
+            let middle = &buffer[run_start + KEEP..run_start + run_len - KEEP];
+            if let Some(reset) = middle
+                .iter()
+                .rposition(|&b| !b.is_ascii_alphanumeric() && b != b'.')
+            {
+                if reset >= MIN_SKIP {
+                    self.feed_impl(&buffer[fed..run_start + KEEP], false);
+                    fed = run_start + KEEP + reset;
+                }
+            }
+            run_start += run_len + 1;
+        }
+        self.feed_impl(&buffer[fed..], last);
     }
 
     /// Guess the encoding given the bytes pushed to the detector so far
@@ -3917,5 +3961,98 @@ mod tests {
             v.extend_from_slice(b"\xB5\xC4");
         }
         check_bytes(&v, ISO_8859_5);
+    }
+
+    /// Returns everything about the candidates that `guess()` reads.
+    fn guess_inputs(det: &EncodingDetector) -> Vec<(Option<i64>, u64, u64)> {
+        det.candidates
+            .iter()
+            .map(|c| match &c.inner {
+                InnerCandidate::NonLatinCased(i) => (c.score, i.longest_word, 0),
+                InnerCandidate::Caseless(i) => (c.score, i.longest_word, 0),
+                InnerCandidate::ArabicFrench(i) => (c.score, i.longest_word, 0),
+                InnerCandidate::Logical(i) => (c.score, i.longest_word, i.plausible_punctuation),
+                InnerCandidate::Visual(i) => (c.score, i.longest_word, i.plausible_punctuation),
+                _ => (c.score, 0, 0),
+            })
+            .collect()
+    }
+
+    fn feed_in_chunks(bytes: &[u8], chunk_len: usize) -> Vec<(Option<i64>, u64, u64)> {
+        let mut det = EncodingDetector::new(Iso2022JpDetection::Allow);
+        for chunk in bytes.chunks(chunk_len) {
+            det.feed(chunk, false);
+        }
+        det.feed(b"", true);
+        guess_inputs(&det)
+    }
+
+    /// Checks that skipping ASCII changes nothing, using byte-by-byte
+    /// feeding, which cannot skip anything, as the reference.
+    fn check_skipping_inert_ascii(bytes: &[u8]) {
+        let expected = feed_in_chunks(bytes, 1);
+        assert_eq!(feed_in_chunks(bytes, bytes.len()), expected, "{:?}", bytes);
+        assert_eq!(feed_in_chunks(bytes, 100), expected, "{:?}", bytes);
+    }
+
+    #[test]
+    fn test_skipping_inert_ascii_numero() {
+        let mut v = b"\x80\x80xxxxxxxx".to_vec();
+        v.extend_from_slice(&[b'a'; 70]);
+        v.extend_from_slice(b" N.123456789012\xBA ");
+        check_skipping_inert_ascii(&v);
+    }
+
+    #[test]
+    fn test_skipping_inert_ascii_iso_2022_jp() {
+        let mut v = b"\x1B$B".to_vec();
+        v.extend_from_slice(&[b'!'; 100]);
+        v.extend_from_slice(b"\x1B(B");
+        check_skipping_inert_ascii(&v);
+        check_bytes(&v, ISO_2022_JP);
+    }
+
+    #[test]
+    fn test_skipping_inert_ascii_generated() {
+        let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut rnd = move |n: usize| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x % n as u64) as usize
+        };
+        const ALPHABETS: [&[u8]; 8] = [
+            b"abcxyzNOAZ",
+            b"0123456789",
+            b" .,;:!?-'\"()<>/=&#%",
+            b"\t\n\r ",
+            b"\x00\x01\x7F\x1A",
+            b"oaOAnNrRi2. ",
+            b"NnMDSIVX.",
+            b"IVX0123456789.N ",
+        ];
+        for _ in 0..300 {
+            let mut v = Vec::new();
+            for _ in 0..rnd(8) + 1 {
+                for _ in 0..rnd(4) + 1 {
+                    v.push(match rnd(4) {
+                        0 => [0xAA, 0xBA, 0xA9, 0xA0][rnd(4)],
+                        _ => 0x80 + rnd(128) as u8,
+                    });
+                }
+                let len = rnd(200) + 1;
+                let edge = ALPHABETS[rnd(ALPHABETS.len())];
+                let middle = ALPHABETS[rnd(ALPHABETS.len())];
+                for i in 0..len {
+                    let alphabet = if i < 10 || i + 10 >= len {
+                        edge
+                    } else {
+                        middle
+                    };
+                    v.push(alphabet[rnd(alphabet.len())]);
+                }
+            }
+            check_skipping_inert_ascii(&v);
+        }
     }
 }
